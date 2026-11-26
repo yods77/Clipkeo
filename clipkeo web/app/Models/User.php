@@ -52,6 +52,7 @@ class User extends Authenticatable
         'remember_token',
         'security_pin',
         'google_id',
+        'fcm_token',
     ];
 
     /**
