@@ -4,9 +4,15 @@ This release verifies Google Sign-In ID tokens on the Laravel server. The mobile
 
 ## 1. Google OAuth client
 
-Create an OAuth 2.0 Client ID of type **Web application** in the Google Cloud project used by Clipkeo. Keep the existing Android OAuth client configured with the app package name and signing certificate fingerprints.
+The repository's existing `clipkeo app/android/app/google-services.json` already contains a Web OAuth Client ID (client_type 3). Reuse this client if it is still listed as an active **Web application** credential in Google Cloud Console; do not create a duplicate unnecessarily. The current ID in the repository is:
 
-Use the same Web Client ID in both places:
+```text
+547667495216-6bo81v6hjedoesboju2eoc9nik4o5tmv.apps.googleusercontent.com
+```
+
+If this credential is missing or inactive, create a replacement OAuth 2.0 Client ID of type **Web application** in the existing `clipkeo` project. Keep the Android OAuth client configured with package name `com.example.clipkeo_mobile` and the appropriate signing certificate fingerprints.
+
+Use the same active Web Client ID in both places:
 
 - Laravel environment: `GOOGLE_CLIENT_ID=<WEB_CLIENT_ID>`
 - Flutter build: `--dart-define=GOOGLE_SERVER_CLIENT_ID=<WEB_CLIENT_ID>`
