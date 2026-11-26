@@ -5,6 +5,7 @@ import 'register_name_screen.dart'; // Import halaman input nama
 import 'main_screen.dart'; // Panggil file induknya
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../config.dart';
 import 'welcome_screen.dart';
 import 'ForgotPasswordScreen.dart';
 
@@ -34,7 +35,11 @@ class _LoginScreenState extends State<LoginScreen> {
   Timer? _autoScrollTimer;
 
   // Pakai cara paling simpel
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: AppConfig.googleServerClientId.isEmpty
+        ? null
+        : AppConfig.googleServerClientId,
+  );
 
   @override
   /**
@@ -262,36 +267,39 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handleGoogleLogin() async {
     try {
-      // 1. Pilih Akun Google
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return; // User batal pilih akun
+      if (googleUser == null) return;
 
+      final googleAuthentication = await googleUser.authentication;
+      final idToken = googleAuthentication.idToken;
+
+      if (idToken == null || idToken.isEmpty) {
+        _showErrorSnackBar(
+          'Google Sign-In belum dikonfigurasi. Web OAuth Client ID perlu dipasang pada aplikasi.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
       setState(() => _isLoading = true);
 
-      // 2. Kirim ke Backend Laravel
-      final result = await _authService.loginWithGoogle(
-        email: googleUser.email,
-        googleId: googleUser.id,
-        name: googleUser.displayName ?? "User Clipkeo",
-        photoUrl: googleUser.photoUrl,
-      );
+      final result = await _authService.loginWithGoogle(idToken: idToken);
 
+      if (!mounted) return;
       setState(() => _isLoading = false);
 
       if (result['success'] == true) {
-        // ✅ BERHASIL! Langsung lempar ke WelcomeScreen
-        if (!mounted) return;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const WelcomeScreen()),
         );
       } else {
-        // Tampilkan error jika gagal
-        _showErrorSnackBar(result['message']);
+        _showErrorSnackBar(result['message'] ?? 'Google Sign-In gagal.');
       }
-    } catch (error) {
+    } catch (_) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      _showErrorSnackBar("Terjadi kesalahan: $error");
+      _showErrorSnackBar('Google Sign-In gagal. Silakan coba lagi.');
     }
   }
 
