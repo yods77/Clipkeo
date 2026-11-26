@@ -34,6 +34,30 @@ class AuthenticationSecurityTest extends TestCase
             ]);
     }
 
+    public function test_password_reset_does_not_disclose_unknown_email_addresses(): void
+    {
+        $this->postJson('/api/forgot-password', [
+            'email' => 'not-registered@example.com',
+        ])
+            ->assertOk()
+            ->assertJson([
+                'success' => true,
+                'message' => 'Jika email terdaftar, kode OTP akan dikirim.',
+            ]);
+    }
+
+    public function test_pin_reset_does_not_disclose_unknown_email_addresses(): void
+    {
+        $this->postJson('/api/forgot-pin', [
+            'email' => 'not-registered-pin@example.com',
+        ])
+            ->assertOk()
+            ->assertJson([
+                'success' => true,
+                'message' => 'Jika email terdaftar, kode OTP akan dikirim.',
+            ]);
+    }
+
     public function test_google_login_does_not_trust_client_supplied_identity_fields(): void
     {
         $this->postJson('/api/login-google', [
