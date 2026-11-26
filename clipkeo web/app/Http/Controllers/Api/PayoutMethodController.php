@@ -22,4 +22,5 @@ class PayoutMethodController extends Controller
             'success' => true,
             'data' => $user->payoutMethods()->get(),
         ]);
-    }}
+    }
+}

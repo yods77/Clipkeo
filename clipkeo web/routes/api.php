@@ -114,7 +114,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ]);
     });
 
-    });
+    Route::get('/payout-methods', [PayoutMethodController::class, 'index']);
+});
 
 Route::get('/campaigns', function () {
     try {
@@ -463,5 +464,4 @@ Route::get('/my-submissions', function (Request $request) {
 Route::get('/campaigns', [BountyController::class, 'index']);
 Route::get('/categories', [BountyController::class, 'getCategories']);
 Route::get('/leaderboard', [LeaderboardController::class, 'index']);
-Route::get('/payout-methods', [PayoutMethodController::class, 'index']);
 
