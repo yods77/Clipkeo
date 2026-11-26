@@ -15,12 +15,16 @@ class MissionService {
   Future<List<dynamic>> getMyMissions() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? userId = prefs.getString('user_id');
+      String? token = prefs.getString('token');
 
-      if (userId == null) return [];
+      if (token == null || token.isEmpty) return [];
 
       final response = await http.get(
-        Uri.parse('$baseUrl/my-submissions?user_id=$userId'),
+        Uri.parse('$baseUrl/my-submissions'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
       );
 
       if (response.statusCode == 200) {
@@ -29,8 +33,7 @@ class MissionService {
       } else {
         return [];
       }
-    } catch (e) {
-      print("Error Fetch Mission: $e");
+    } catch (_) {
       return [];
     }
   }

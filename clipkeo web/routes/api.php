@@ -115,6 +115,18 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::get('/payout-methods', [PayoutMethodController::class, 'index']);
+
+    Route::get('/my-submissions', function (Request $request) {
+        $submissions = $request->user()->submissions()
+            ->with('bounty')
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $submissions,
+        ]);
+    });
 });
 
 Route::get('/campaigns', function () {
@@ -259,7 +271,6 @@ Route::post('/campaigns/{id}/submit', function (Request $request, $id) {
 
     // 2. VALIDASI AWAL
     $validator = Validator::make($request->all(), [
-        'user_id' => 'required',
         'video_link' => 'required|url',
         'current_views' => 'required|integer',
         'analytics_file' => 'required|file|max:102400',
@@ -270,8 +281,27 @@ Route::post('/campaigns/{id}/submit', function (Request $request, $id) {
         return response()->json(['status' => 'error', 'message' => $validator->errors()->first()], 400);
     }
 
+    $linkedAccount = \App\Models\LinkedAccount::query()
+        ->whereKey($request->input('linked_account_id'))
+        ->where('user_id', $request->user()->id)
+        ->first();
+
+    if (!$linkedAccount) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Akun media sosial tidak valid.',
+        ], 403);
+    }
+
     try {
         $bounty = Bounty::find($id);
+
+        if (!$bounty) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Campaign tidak ditemukan.',
+            ], 404);
+        }
 
         // 3. PANGGIL POLISI (Gunakan variabel $extractId)
         $result = $extractId($request->video_link);
@@ -326,7 +356,7 @@ Route::post('/campaigns/{id}/submit', function (Request $request, $id) {
 
         if ($existing) {
             // JIKA PEMILIK BEDA -> BLOKIR (ANTI-TIKUNG)
-            if ($existing->clipper_id != $request->user_id) {
+            if ($existing->clipper_id != $request->user()->id) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Link video ini sudah diklaim clipper lain. Gunakan video original milikmu sendiri!'
@@ -384,11 +414,11 @@ if ($request->hasFile('analytics_file')) {
         $submission = Submission::updateOrCreate(
             [
                 'video_id' => $videoId, // Cari berdasarkan ID ini
-                'clipper_id' => $request->user_id
+                'clipper_id' => $request->user()->id
             ],
             [
                 'bounty_id' => $id,
-                'linked_account_id' => $request->linked_account_id,
+                'linked_account_id' => $linkedAccount->id,
                 'video_url' => $request->video_link,
                 'views_count' => $request->current_views,
                 'caption_content' => $request->caption_content,
@@ -419,7 +449,7 @@ if ($request->hasFile('analytics_file')) {
         Log::error("GAGAL SUBMIT: " . $e->getMessage());
         return response()->json(['status' => 'error', 'message' => 'Server Crash: ' . $e->getMessage()], 500);
     }
-});
+})->middleware('auth:sanctum');
 
 Route::get('/cek-config', function () {
     return response()->json([
@@ -430,31 +460,7 @@ Route::get('/cek-config', function () {
     ]);
 });
 
-Route::get('/my-submissions', function (Request $request) {
-    // Paksa user_id jadi Integer agar sinkron dengan Database
-    $userId = (int) $request->query('user_id');
 
-    if (!$userId) {
-        return response()->json(['status' => 'error', 'message' => 'ID Kosong'], 400);
-    }
-
-    try {
-        $submissions = App\Models\Submission::where('clipper_id', $userId)
-            ->with(['bounty']) // Mengambil data relasi
-            ->latest()
-            ->get();
-
-        // LOG untuk debug di terminal Laravel (php artisan serve)
-        \Log::info("User $userId minta data. Ketemu: " . $submissions->count());
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $submissions
-        ]);
-    } catch (\Exception $e) {
-        return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
-    }
-});
 
 
 

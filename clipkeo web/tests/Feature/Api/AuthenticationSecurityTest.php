@@ -210,4 +210,10 @@ class AuthenticationSecurityTest extends TestCase
     {
         $this->getJson('/api/cek-koneksi-cloud')->assertNotFound();
     }
+
+    public function test_submission_endpoints_require_authentication(): void
+    {
+        $this->getJson('/api/my-submissions')->assertUnauthorized();
+        $this->postJson('/api/campaigns/1/submit', [])->assertUnauthorized();
+    }
 }

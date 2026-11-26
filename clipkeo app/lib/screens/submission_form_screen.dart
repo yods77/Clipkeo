@@ -110,9 +110,9 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
     }
 
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? storedUserId = prefs.getString('user_id');
+    String? token = prefs.getString('token');
 
-    if (storedUserId == null) {
+    if (token == null || token.isEmpty) {
       _showSnack("Sesi habis. Silakan login ulang aplikasi.", Colors.red);
       return;
     }
@@ -124,8 +124,11 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
         "${AppConfig.baseUrl}/campaigns/${widget.campaignId}/submit",
       );
       var request = http.MultipartRequest('POST', uri);
+      request.headers.addAll({
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json',
+      });
 
-      request.fields['user_id'] = storedUserId;
       request.fields['linked_account_id'] = _selectedAccountId!;
       request.fields['video_link'] = _linkController.text;
       request.fields['current_views'] = _viewsController.text;
