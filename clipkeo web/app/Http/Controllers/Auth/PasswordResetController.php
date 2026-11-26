@@ -3,91 +3,159 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use App\Models\User;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Log;
 use App\Mail\ResetPasswordMail;
+use App\Models\User;
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
+use Throwable;
 
 class PasswordResetController extends Controller
 {
-    // STEP 1: Kirim OTP ke Email
+    private const OTP_TTL_MINUTES = 10;
+    private const OTP_MAX_ATTEMPTS = 5;
+
     public function sendOtp(Request $request)
     {
-        
-        $request->validate(['email' => 'required|email']);
-        $user = User::where('email', $request->email)->first();
+        $request->validate(['email' => 'required|email|max:255']);
 
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Email tidak terdaftar'], 404);
+        $email = Str::lower(trim($request->input('email')));
+        $sendKey = $this->sendKey($email);
+
+        if (RateLimiter::tooManyAttempts($sendKey, 3)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terlalu banyak permintaan OTP. Silakan coba lagi beberapa saat.',
+            ], 429);
         }
 
-        // Generate 6 digit angka
-        $otp = rand(100000, 999999);
-        Log::info("OTP untuk {$request->email} adalah: $otp");
+        RateLimiter::hit($sendKey, self::OTP_TTL_MINUTES * 60);
 
-        // Simpan ke tabel password_reset_tokens (hapus data lama dulu biar gak numpuk)
-        DB::table('password_reset_tokens')->where('email', $request->email)->delete();
+        $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
+
+        // Do not reveal whether an email address has a Clipkeo account.
+        if (!$user) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Jika email terdaftar, kode OTP akan dikirim.',
+            ]);
+        }
+
+        $otp = (string) random_int(100000, 999999);
+
+        DB::table('password_reset_tokens')->where('email', $email)->delete();
         DB::table('password_reset_tokens')->insert([
-            'email' => $request->email,
-            'token' => Hash::make($otp), // Kita hash biar aman
-            'created_at' => now()
+            'email' => $email,
+            'token' => Hash::make($otp),
+            'created_at' => now(),
         ]);
 
         try {
-            Mail::to($request->email)->send(new ResetPasswordMail($otp));
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Kode OTP berhasil dikirim ke email kamu.'
-            ]);
-        } catch (\Exception $e) {
+            Mail::to($email)->send(new ResetPasswordMail($otp));
+        } catch (Throwable $exception) {
+            DB::table('password_reset_tokens')->where('email', $email)->delete();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal mengirim email, coba lagi nanti.'
-            ], 500);
+                'message' => 'Kode OTP belum dapat dikirim. Silakan coba lagi nanti.',
+            ], 503);
         }
 
-        // Kirim email (Pastikan .env SMTP sudah diisi)
-        // Mail::to($request->email)->send(new \App\Mail\OtpMail($otp));
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Email tidak ditemukan'
-            ], 404);
-        }
         return response()->json([
             'success' => true,
-            'message' => 'Kode OTP berhasil dikirim (Cek Log/Email)',
-            'otp_debug' => $otp
+            'message' => 'Jika email terdaftar, kode OTP akan dikirim.',
         ]);
     }
 
-    // STEP 2: Validasi OTP & Ganti Password
     public function resetPassword(Request $request)
     {
         $request->validate([
-            'email' => 'required|email',
-            'otp' => 'required',
-            'password' => 'required|min:8|confirmed'
+            'email' => 'required|email|max:255',
+            'otp' => 'required|digits:6',
+            'password' => 'required|string|min:8|confirmed',
         ]);
 
-        $resetData = DB::table('password_reset_tokens')->where('email', $request->email)->first();
+        $email = Str::lower(trim($request->input('email')));
+        $attemptKey = $this->attemptKey($email);
 
-        if (!$resetData || !Hash::check($request->otp, $resetData->token)) {
-            return response()->json(['success' => false, 'message' => 'Kode OTP salah atau kedaluwarsa'], 400);
+        if (RateLimiter::tooManyAttempts($attemptKey, self::OTP_MAX_ATTEMPTS)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Terlalu banyak percobaan OTP. Minta kode baru dan coba lagi nanti.',
+            ], 429);
         }
 
-        // Update Password User
-        User::where('email', $request->email)->update([
-            'password' => Hash::make($request->password)
-        ]);
+        $result = DB::transaction(function () use ($request, $email) {
+            $resetData = DB::table('password_reset_tokens')
+                ->where('email', $email)
+                ->lockForUpdate()
+                ->first();
 
-        // Hapus token setelah dipakai
-        DB::table('password_reset_tokens')->where('email', $request->email)->delete();
+            if (!$resetData) {
+                return 'invalid';
+            }
 
-        return response()->json(['success' => true, 'message' => 'Password berhasil diperbarui']);
+            if (
+                !$resetData->created_at ||
+                Carbon::parse($resetData->created_at)->addMinutes(self::OTP_TTL_MINUTES)->isPast()
+            ) {
+                DB::table('password_reset_tokens')->where('email', $email)->delete();
+                return 'expired';
+            }
+
+            if (!Hash::check($request->input('otp'), $resetData->token)) {
+                return 'invalid';
+            }
+
+            $user = User::whereRaw('LOWER(email) = ?', [$email])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$user) {
+                DB::table('password_reset_tokens')->where('email', $email)->delete();
+                return 'invalid';
+            }
+
+            $user->password = Hash::make($request->input('password'));
+            $user->save();
+
+            // Password reset revokes all existing API sessions for this account.
+            $user->tokens()->delete();
+            DB::table('password_reset_tokens')->where('email', $email)->delete();
+
+            return 'success';
+        });
+
+        if ($result === 'success') {
+            RateLimiter::clear($attemptKey);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Password berhasil diperbarui. Silakan login kembali.',
+            ]);
+        }
+
+        RateLimiter::hit($attemptKey, self::OTP_TTL_MINUTES * 60);
+
+        return response()->json([
+            'success' => false,
+            'message' => $result === 'expired'
+                ? 'Kode OTP sudah kedaluwarsa. Silakan minta kode baru.'
+                : 'Kode OTP tidak valid.',
+        ], 400);
+    }
+
+    private function sendKey(string $email): string
+    {
+        return 'password-reset-send:' . hash('sha256', $email);
+    }
+
+    private function attemptKey(string $email): string
+    {
+        return 'password-reset-attempt:' . hash('sha256', $email);
     }
 }
