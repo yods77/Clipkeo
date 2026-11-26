@@ -207,7 +207,7 @@ class PinResetController extends Controller
 
     private function verifyAttemptKey(string $email): string
     {
-        return 'pin-reset-verify:' . hash('sha256', $email);
+        return $this->resetAttemptKey($email);
     }
 
     private function resetAttemptKey(string $email): string
