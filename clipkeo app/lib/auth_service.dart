@@ -18,6 +18,7 @@ class AuthService {
     try {
       final response = await http.post(
         Uri.parse('${AppConfig.baseUrl}/login'),
+        headers: {'Accept': 'application/json'},
         body: {'email': email, 'password': password},
       );
 
@@ -151,13 +152,12 @@ class AuthService {
           await prefs.setString('user_name', userNameToSave);
         }
 
-        if (tokenToSave != null) {
+        if (tokenToSave != null && tokenToSave.isNotEmpty) {
           await prefs.setString('token', tokenToSave);
-        } else {
         }
-
       }
-    } catch (e) {
+    } catch (_) {
+      // Authentication data must never be written to logs.
     }
   }
 
@@ -230,10 +230,8 @@ Future<Map<String, dynamic>> forgotPassword(String email) async {
       body: jsonEncode({'email': email}),
     );
 
-    // 🕵️ KITA CEK DI SINI BRO
-
     return jsonDecode(response.body);
-  } catch (e) {
+  } catch (_) {
     return {'success': false, 'message': 'Kesalahan koneksi'};
   }
 }
