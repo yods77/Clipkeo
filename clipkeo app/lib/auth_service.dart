@@ -21,8 +21,6 @@ class AuthService {
         body: {'email': email, 'password': password},
       );
 
-      print("🕵️ STATUS CODE: ${response.statusCode}");
-      print("🕵️ JSON SERVER: ${response.body}");
 
       if (response.statusCode == 200) {
         var data = jsonDecode(response.body);
@@ -83,7 +81,6 @@ class AuthService {
         };
       }
     } catch (e) {
-      print("Error Login: $e");
       return {
         'success': false,
         'is_new_user': false,
@@ -103,7 +100,6 @@ class AuthService {
     String phoneNumber,
   ) async {
     try {
-      print("Mendaftarkan: $email...");
       final response = await http.post(
         Uri.parse('$baseUrl/register'),
         body: {
@@ -114,27 +110,22 @@ class AuthService {
         },
       );
 
-      print("Status Register: ${response.statusCode}");
 
       if (response.statusCode == 201 || response.statusCode == 200) {
-        print("Register Sukses. Melakukan Auto-Login...");
 
         // Panggil login supaya Token tersimpan di SharedPreferences
         await login(email, password);
 
         return true;
       } else {
-        print("❌ Register Gagal: ${response.body}");
         return false;
       }
     } catch (e) {
-      print("❌ Error Register: $e");
       return false;
     }
   }
 
   Future<void> _performSaveSession(Map<String, dynamic> result) async {
-    print("💾 [AUTH] Menyimpan sesi login...");
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
 
@@ -162,54 +153,67 @@ class AuthService {
 
         if (tokenToSave != null) {
           await prefs.setString('token', tokenToSave);
-          print("✅ [AUTH] Token Berhasil Disimpan: $tokenToSave");
         } else {
-          print("⚠️ [AUTH] Token tidak ditemukan dalam response server!");
         }
 
-        print("✅ [AUTH] Sesi berhasil disimpan! ID: $userIdToSave");
       }
     } catch (e) {
-      print("❌ [AUTH ERROR] Gagal simpan sesi: $e");
     }
   }
 
-  // Fungsi Helper: Logout
+  // Revoke the current API token before clearing the local session.
   Future<void> logout() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.clear(); // Hapus semua data (Token, Nama, dll)
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+
+    if (token != null && token.isNotEmpty) {
+      try {
+        await http
+            .post(
+              Uri.parse('$baseUrl/logout'),
+              headers: {
+                'Accept': 'application/json',
+                'Authorization': 'Bearer $token',
+              },
+            )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // Always clear the local session, even if the device is offline.
+      }
+    }
+
+    await prefs.clear();
   }
 
   Future<Map<String, dynamic>> loginWithGoogle({
-    required String email,
-    required String googleId,
-    required String name,
-    String? photoUrl,
+    required String idToken,
   }) async {
     try {
-      print("DEBUG: Mengirim Foto -> $photoUrl");
       final response = await http.post(
         Uri.parse('$baseUrl/login-google'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'google_id': googleId,
-          'name': name,
-          'avatar_url': photoUrl,
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({'id_token': idToken}),
       );
 
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+
       if (response.statusCode == 200) {
-        var data = jsonDecode(response.body);
-
-        // 🔥 PENTING: Simpan Token dan Data User ke HP
         await _performSaveSession(data);
-
         return {'success': true, 'data': data};
       }
-      return {'success': false, 'message': 'Gagal koneksi ke server'};
-    } catch (e) {
-      return {'success': false, 'message': e.toString()};
+
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Google Sign-In gagal diverifikasi.',
+      };
+    } catch (_) {
+      return {
+        'success': false,
+        'message': 'Tidak dapat terhubung ke server. Silakan coba lagi.',
+      };
     }
   }
 
@@ -227,12 +231,9 @@ Future<Map<String, dynamic>> forgotPassword(String email) async {
     );
 
     // 🕵️ KITA CEK DI SINI BRO
-    print("🕵️ DETEKTIF: Status Code -> ${response.statusCode}");
-    print("🕵️ DETEKTIF: Respon Server -> ${response.body}");
 
     return jsonDecode(response.body);
   } catch (e) {
-    print("❌ DETEKTIF: Error Catch -> $e");
     return {'success': false, 'message': 'Kesalahan koneksi'};
   }
 }
