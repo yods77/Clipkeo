@@ -233,6 +233,10 @@ class AuthController extends Controller
         $user = $request->user();
 
         if ($user) {
+            // This schema stores one FCM token per account, so clear it on logout
+            // to avoid sending private notifications to a signed-out device.
+            $user->update(['fcm_token' => null]);
+
             $currentToken = $user->currentAccessToken();
 
             if ($currentToken && method_exists($currentToken, 'delete')) {
