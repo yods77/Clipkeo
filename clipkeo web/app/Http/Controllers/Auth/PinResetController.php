@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Throwable;
@@ -59,10 +60,14 @@ class PinResetController extends Controller
         } catch (Throwable $exception) {
             DB::table('pin_reset_tokens')->where('email', $email)->delete();
 
+            Log::error('PIN reset OTP delivery failed.', [
+                'exception' => get_class($exception),
+            ]);
+
             return response()->json([
-                'success' => false,
-                'message' => 'Kode OTP belum dapat dikirim. Silakan coba lagi nanti.',
-            ], 503);
+                'success' => true,
+                'message' => 'Jika email terdaftar, kode OTP akan dikirim.',
+            ]);
         }
 
         return response()->json([
