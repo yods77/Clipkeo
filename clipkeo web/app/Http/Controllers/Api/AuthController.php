@@ -3,48 +3,47 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Models\User;
+use Google\Client as GoogleClient;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Auth;
-use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Throwable;
 
 class AuthController extends Controller
 {
     // REGISTER
     public function register(Request $request)
     {
-        // 1. Validasi Input
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:8',
+            'phone_number' => 'nullable|string|max:30',
         ]);
 
         if ($validator->fails()) {
             return response()->json($validator->errors(), 422);
         }
 
-        // 2. Buat Username Otomatis (Contoh: "Yoga" -> "yoga832")
-        $baseUsername = strtolower(explode(' ', $request->name)[0]);
-        $username = $baseUsername . rand(100, 999);
+        $baseUsername = Str::slug(Str::before($request->name, ' ')) ?: 'clipper';
+        do {
+            $username = substr($baseUsername, 0, 20) . random_int(100, 9999);
+        } while (User::where('username', $username)->exists());
 
-        // 3. Simpan User Baru (Lengkap dengan default value)
         $user = User::create([
             'name' => $request->name,
-            'email' => $request->email,
-            'password' => \Illuminate\Support\Facades\Hash::make($request->password),
-            'username' => $username,          // Wajib diisi
+            'email' => Str::lower(trim($request->email)),
+            'password' => Hash::make($request->password),
+            'username' => $username,
             'phone_number' => $request->phone_number,
-            'role' => 'clipper',              // Default role
+            'role' => 'clipper',
             'wallet_balance' => 0,
             'reputation_score' => 1,
         ]);
 
-        // 4. Buat Token (Login otomatis setelah daftar)
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
@@ -54,30 +53,32 @@ class AuthController extends Controller
             'token_type' => 'Bearer',
         ]);
     }
-    // LOGIN (Versi Bypass Auth::attempt)
+
+    // LOGIN
     public function login(Request $request)
     {
-        // 1. CATAT LOG (Ini CCTV-nya)
-        \Illuminate\Support\Facades\Log::info('Login Request Masuk:', $request->all());
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|string|email|max:255',
+            'password' => 'required|string',
+        ]);
 
-        // 2. Cek User
-        $user = User::where('email', $request->email)->first();
-
-        // 3. Cek apakah user ketemu?
-        if (!$user) {
-            \Illuminate\Support\Facades\Log::error('Login Gagal: User tidak ditemukan untuk email ' . $request->email);
-            return response()->json(['message' => 'User tidak ditemukan'], 401);
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Email atau password tidak valid.',
+                'errors' => $validator->errors(),
+            ], 422);
         }
 
-        // 4. Cek Password
-        if (!Hash::check($request->password, $user->password)) {
-            \Illuminate\Support\Facades\Log::error('Login Gagal: Password salah untuk ' . $request->email);
-            return response()->json(['message' => 'Password Salah'], 401);
+        $email = Str::lower(trim($request->input('email')));
+        $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
+
+        if (!$user || !$user->password || !Hash::check($request->input('password'), $user->password)) {
+            return response()->json([
+                'message' => 'Email atau password tidak valid.',
+            ], 401);
         }
 
-        // 5. Jika lolos semua
         $token = $user->createToken('auth_token')->plainTextToken;
-        \Illuminate\Support\Facades\Log::info('Login Sukses: Token dibuat untuk ' . $request->email);
 
         return response()->json([
             'message' => 'Login berhasil',
@@ -87,168 +88,161 @@ class AuthController extends Controller
         ]);
     }
 
+    // GOOGLE LOGIN: only accept a Google ID token verified by Google.
     public function googleLogin(Request $request)
-{
-    // 🕵️ DETEKTIF: Catat data awal yang dikirim dari Flutter
-    Log::info('--- [DETEKTIF] Google Login Start ---');
-    Log::info('Payload dari Flutter:', $request->all());
+    {
+        $validator = Validator::make($request->all(), [
+            'id_token' => 'required|string',
+        ]);
 
-    // 1. Validasi Input
-    $validator = Validator::make($request->all(), [
-        'email' => 'required|email',
-        'name' => 'required|string',
-        'google_id' => 'required',
-        'avatar' => 'nullable'
-    ]);
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Token Google wajib dikirim.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
 
-    if ($validator->fails()) {
-        Log::warning('Validasi Gagal:', $validator->errors()->toArray());
-        return response()->json($validator->errors(), 422);
-    }
+        $clientId = config('services.google.client_id');
 
-    try {
-        $user = User::where('email', $request->email)->first();
+        if (empty($clientId)) {
+            return response()->json([
+                'message' => 'Google Sign-In belum dikonfigurasi di server.',
+            ], 503);
+        }
 
-        if (!$user) {
-            Log::info('User baru terdeteksi, mencoba mendaftarkan...');
+        try {
+            $googleClient = new GoogleClient(['client_id' => $clientId]);
+            $payload = $googleClient->verifyIdToken($request->input('id_token'));
 
-            $cloudinaryUrl = null;
-            
-            // 🕵️ DETEKTIF: Cek Avatar
-            if ($request->avatar) {
-                // Cek apakah ini avatar placeholder Google (/0)
-                if (str_contains($request->avatar, '/0')) {
-                    Log::info('Avatar adalah placeholder (/0), melewati upload Cloudinary.');
-                } else {
-                    Log::info('Mencoba upload avatar ke Cloudinary: ' . $request->avatar);
-                    try {
-                        $upload = Cloudinary::upload($request->avatar, [
-                            'folder' => 'avatars',
-                            'transformation' => [
-                                'width' => 200, 'height' => 200, 'crop' => 'fill'
-                            ]
-                        ]);
-                        $cloudinaryUrl = $upload->getSecurePath();
-                        Log::info('Cloudinary Berhasil! URL: ' . $cloudinaryUrl);
-                    } catch (\Exception $e) {
-                        Log::error('Cloudinary Ngambek: ' . $e->getMessage());
+            if (
+                !$payload ||
+                empty($payload['sub']) ||
+                empty($payload['email']) ||
+                !filter_var($payload['email'], FILTER_VALIDATE_EMAIL) ||
+                !filter_var($payload['email_verified'] ?? false, FILTER_VALIDATE_BOOLEAN)
+            ) {
+                return response()->json([
+                    'message' => 'Token Google tidak valid atau email belum terverifikasi.',
+                ], 401);
+            }
+
+            $googleId = (string) $payload['sub'];
+            $email = Str::lower(trim($payload['email']));
+
+            $user = User::where('google_id', $googleId)->first();
+
+            if (!$user) {
+                $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
+
+                if ($user && $user->google_id && !hash_equals((string) $user->google_id, $googleId)) {
+                    return response()->json([
+                        'message' => 'Akun Google tidak cocok dengan akun Clipkeo ini.',
+                    ], 409);
+                }
+
+                if (!$user) {
+                    $name = trim((string) ($payload['name'] ?? ''));
+                    if ($name === '') {
+                        $name = Str::before($email, '@');
                     }
+
+                    $baseUsername = Str::slug(Str::before($name, ' ')) ?: 'clipper';
+                    do {
+                        $username = substr($baseUsername, 0, 20) . random_int(100, 9999);
+                    } while (User::where('username', $username)->exists());
+
+                    $picture = $payload['picture'] ?? null;
+                    $avatarUrl = is_string($picture) && str_starts_with($picture, 'https://')
+                        ? $picture
+                        : null;
+
+                    $user = User::create([
+                        'name' => Str::limit($name, 255, ''),
+                        'email' => $email,
+                        'password' => Hash::make(Str::random(64)),
+                        'username' => $username,
+                        'google_id' => $googleId,
+                        'avatar_url' => $avatarUrl,
+                        'role' => 'clipper',
+                    ]);
+                } else {
+                    // A verified Google email may be linked to the matching existing account.
+                    $user->google_id = $googleId;
+                    $user->save();
                 }
             }
 
-            // Generate Username
-            $username = strtolower(explode(' ', $request->name)[0]) . rand(100, 999);
-            Log::info('Generated Username: ' . $username);
+            $token = $user->createToken('auth_token')->plainTextToken;
 
-            // 🕵️ DETEKTIF: Simpan ke DB
-            $user = User::create([
-                'name' => $request->name,
-                'email' => $request->email,
-                'password' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(24)),
-                'username' => $username,
-                'google_id' => $request->google_id,
-                'avatar_url' => $cloudinaryUrl, // 🔥 Sesuaikan nama kolom DB kamu (avatar_url)
-                'role' => 'clipper',
+            return response()->json([
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'user' => $user,
+            ]);
+        } catch (Throwable $exception) {
+            // Never log the submitted ID token, email, or raw exception payload.
+            Log::error('Google Sign-In token verification failed.', [
+                'exception' => get_class($exception),
             ]);
 
-            Log::info('User Berhasil Dibuat. ID: ' . $user->id);
-        } else {
-            Log::info('User lama ditemukan. ID: ' . $user->id);
+            return response()->json([
+                'message' => 'Google Sign-In tidak dapat diverifikasi saat ini. Silakan coba lagi.',
+            ], 503);
         }
-
-        // 🕵️ DETEKTIF: Tokenizing
-        $token = $user->createToken('auth_token')->plainTextToken;
-        Log::info('Token Berhasil Dibuat.');
-        Log::info('--- [DETEKTIF] Google Login Selesai (SUCCESS) ---');
-
-        return response()->json([
-            'access_token' => $token,
-            'token_type' => 'Bearer',
-            'user' => $user
-        ]);
-
-    } catch (\Exception $e) {
-        // 🕵️ DETEKTIF: Tangkap Error yang bikin server crash
-        Log::error('--- [DETEKTIF] CRASH DI GOOGLE LOGIN ---');
-        Log::error('Pesan Error: ' . $e->getMessage());
-        Log::error('File: ' . $e->getFile() . ' baris ' . $e->getLine());
-        
-        return response()->json([
-            'status' => 'error',
-            'message' => 'Internal Server Error: ' . $e->getMessage()
-        ], 500);
     }
-}
 
     public function updatePhoneNumber(Request $request)
     {
         $request->validate([
-            'phone_number' => 'required|string|min:10|unique:users,phone_number',
+            'phone_number' => 'required|string|min:10|max:30|unique:users,phone_number',
         ]);
 
-        $user = auth()->user(); // Mengambil user dari token yang sedang login
+        $user = $request->user();
 
-        if ($user) {
-            $user->update([
-                'phone_number' => $request->phone_number,
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Nomor HP berhasil diperbarui!',
-            ]);
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'User tidak ditemukan'], 401);
         }
 
-        return response()->json(['success' => false, 'message' => 'User tidak ditemukan'], 401);
-    }
-
-    public function updateFcmToken(\Illuminate\Http\Request $request)
-    {
-        // 1. Validasi
-        $request->validate([
-            'fcm_token' => 'required|string',
-        ]);
-
-        // 2. Ambil User Login
-        $user = auth()->user();
-
-        // 3. Simpan Token
-        if ($user) {
-            $user->update([
-                'fcm_token' => $request->fcm_token
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'FCM Token berhasil diupdate!',
-            ]);
-        }
+        $user->update(['phone_number' => $request->phone_number]);
 
         return response()->json([
-            'success' => false,
-            'message' => 'User tidak ditemukan',
-        ], 401);
+            'success' => true,
+            'message' => 'Nomor HP berhasil diperbarui!',
+        ]);
     }
 
-    // LOGOUT
+    public function updateFcmToken(Request $request)
+    {
+        $request->validate([
+            'fcm_token' => 'required|string|max:4096',
+        ]);
+
+        $request->user()->update([
+            'fcm_token' => $request->fcm_token,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'FCM Token berhasil diperbarui!',
+        ]);
+    }
+
+    // LOGOUT: revoke the current Sanctum token.
     public function logout(Request $request)
     {
-        // 1. Ambil user yang sedang request
         $user = $request->user();
 
         if ($user) {
-            // 🔥 PENTING: Hapus FCM Token biar notif gak nyasar
-            $user->update([
-                'fcm_token' => null
-            ]);
+            $currentToken = $user->currentAccessToken();
 
-            // 2. Hapus Token Login (Sanctum)
-            $user->currentAccessToken()->delete();
+            if ($currentToken && method_exists($currentToken, 'delete')) {
+                $currentToken->delete();
+            }
         }
 
         return response()->json([
             'success' => true,
-            'message' => 'Logout berhasil & Token FCM dibersihkan'
+            'message' => 'Logout berhasil. Token akses telah dicabut.',
         ]);
     }
 }
