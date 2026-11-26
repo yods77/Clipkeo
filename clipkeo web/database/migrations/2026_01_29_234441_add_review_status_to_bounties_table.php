@@ -2,38 +2,75 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::table('bounties', function (Blueprint $table) {
-            // 1. Tambah kolom alasan penolakan
             $table->text('rejection_reason')->nullable()->after('status');
+
+            // Allow both old and new statuses until existing rows are migrated.
+            $table->enum('status', [
+                'draft',
+                'active',
+                'judging',
+                'pending_review',
+                'rejected',
+                'completed',
+                'canceled',
+            ])->default('draft')->change();
         });
 
-        // 2. Update ENUM:
-        // - Menambah: 'pending_review', 'rejected'
-        // - Menghapus: 'judging' (sesuai request)
-        // - Tetap ada: 'draft', 'active', 'completed', 'canceled'
-        
-        DB::statement("ALTER TABLE bounties MODIFY COLUMN status ENUM('draft', 'pending_review', 'active', 'rejected', 'completed', 'canceled') NOT NULL DEFAULT 'draft'");
-    }
-
-    /**
-     * Reverse the migrations.
-     */
-    public function down(): void
-    {
-        // Kembalikan ke enum awal (termasuk judging jika mau rollback)
-        DB::statement("ALTER TABLE bounties MODIFY COLUMN status ENUM('draft', 'active', 'judging', 'completed', 'canceled') NOT NULL DEFAULT 'draft'");
+        DB::table('bounties')
+            ->where('status', 'judging')
+            ->update(['status' => 'pending_review']);
 
         Schema::table('bounties', function (Blueprint $table) {
+            $table->enum('status', [
+                'draft',
+                'pending_review',
+                'active',
+                'rejected',
+                'completed',
+                'canceled',
+            ])->default('draft')->change();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('bounties', function (Blueprint $table) {
+            $table->enum('status', [
+                'draft',
+                'pending_review',
+                'active',
+                'rejected',
+                'judging',
+                'completed',
+                'canceled',
+            ])->default('draft')->change();
+        });
+
+        DB::table('bounties')
+            ->where('status', 'pending_review')
+            ->update(['status' => 'judging']);
+
+        DB::table('bounties')
+            ->where('status', 'rejected')
+            ->update(['status' => 'draft']);
+
+        Schema::table('bounties', function (Blueprint $table) {
+            $table->enum('status', [
+                'draft',
+                'active',
+                'judging',
+                'completed',
+                'canceled',
+            ])->default('draft')->change();
+
             $table->dropColumn('rejection_reason');
         });
     }
