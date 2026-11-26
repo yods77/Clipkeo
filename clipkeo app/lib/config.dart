@@ -1,4 +1,6 @@
 class AppConfig {
+  // Set this to the OAuth 2.0 Web Client ID using --dart-define.
+  static const String googleServerClientId = String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
   // 🔥 GANTI IP DI SINI SAJA (JIKA GANTI WIFI/MODEM) 🔥
   static const String ipAddress = "192.168.1.102"; 
 
