@@ -397,14 +397,7 @@ if ($request->hasFile('analytics_file')) {
     }
 });
 
-Route::get('/cek-config', function () {
-    return response()->json([
-        'post_max_size' => ini_get('post_max_size'),
-        'upload_max_filesize' => ini_get('upload_max_filesize'),
-        'memory_limit' => ini_get('memory_limit'),
-        'max_execution_time' => ini_get('max_execution_time'),
-    ]);
-});
+
 
 Route::get('/my-submissions', function (Request $request) {
     // Paksa user_id jadi Integer agar sinkron dengan Database
@@ -480,10 +473,3 @@ Route::get('/categories', [BountyController::class, 'getCategories']);
 Route::get('/leaderboard', [LeaderboardController::class, 'index']);
 Route::get('/payout-methods', [PayoutMethodController::class, 'index']);
 
-Route::get('/cek-koneksi-cloud', function() {
-    return response()->json([
-        'file_config_lengkap' => config('cloudinary'), // Tanpa .php
-        'hanya_url' => config('cloudinary.cloud_url'), // Spesifik ambil url
-        'env_langsung' => env('CLOUDINARY_URL'),
-    ]);
-});
