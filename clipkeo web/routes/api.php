@@ -23,14 +23,14 @@ use Illuminate\Support\Str;
 use Cloudinary\Cloudinary;
 
 // === PINTU UMUM (Bisa diakses tanpa token) ===
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login']); // <--- INI YANG HILANG TADI!
-Route::post('/login-google', [AuthController::class, 'googleLogin']);
-Route::post('/forgot-password', [PasswordResetController::class, 'sendOtp']);
-Route::post('/reset-password', [PasswordResetController::class, 'resetPassword']);
-Route::post('/forgot-pin', [PinResetController::class, 'sendOtp']);
-Route::post('/reset-pin', [PinResetController::class, 'resetPin']);
-Route::post('/verify-pin-otp', [PinResetController::class, 'verifyOtp']);
+Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+Route::post('/login-google', [AuthController::class, 'googleLogin'])->middleware('throttle:5,1');
+Route::post('/forgot-password', [PasswordResetController::class, 'sendOtp'])->middleware('throttle:5,1');
+Route::post('/reset-password', [PasswordResetController::class, 'resetPassword'])->middleware('throttle:10,1');
+Route::post('/forgot-pin', [PinResetController::class, 'sendOtp'])->middleware('throttle:5,1');
+Route::post('/reset-pin', [PinResetController::class, 'resetPin'])->middleware('throttle:10,1');
+Route::post('/verify-pin-otp', [PinResetController::class, 'verifyOtp'])->middleware('throttle:10,1');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
