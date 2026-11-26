@@ -20,7 +20,7 @@ class AuthController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8',
+            'password' => 'required|string|min:8|max:255',
             'phone_number' => 'nullable|string|max:30',
         ]);
 
@@ -59,7 +59,7 @@ class AuthController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'email' => 'required|string|email|max:255',
-            'password' => 'required|string',
+            'password' => 'required|string|max:255',
         ]);
 
         if ($validator->fails()) {
@@ -92,7 +92,7 @@ class AuthController extends Controller
     public function googleLogin(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'id_token' => 'required|string',
+            'id_token' => 'required|string|max:8192',
         ]);
 
         if ($validator->fails()) {
