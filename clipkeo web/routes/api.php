@@ -91,7 +91,30 @@ Route::middleware('auth:sanctum')->group(function () {
         $request->user()->unreadNotifications->markAsRead();
         return response()->json(['status' => 'success']);
     });
-});
+
+    Route::get('/wallet/dashboard', function (Request $request) {
+        $user = $request->user()->load('payoutMethods');
+        $transactions = $user->transactions()
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get();
+
+        return response()->json([
+            'status' => true,
+            'data' => [
+                'balance' => (int) $user->wallet_balance,
+                'reputation_points' => (int) $user->reputation_points,
+                'tier' => $user->getTierNameAttribute(),
+                'transactions' => $transactions,
+                'unread_notifications_count' => $user->unreadNotifications()->count(),
+                'payout_methods' => $user->payoutMethods,
+                'service_fee_pct' => 0.05,
+                'min_withdraw' => 50000,
+            ],
+        ]);
+    });
+
+    });
 
 Route::get('/campaigns', function () {
     try {
@@ -432,45 +455,7 @@ Route::get('/my-submissions', function (Request $request) {
     }
 });
 
-/*
-|--------------------------------------------------------------------------
-| API WALLET DASHBOARD (UPDATED)
-|--------------------------------------------------------------------------
-| Mengambil Saldo, Riwayat Transaksi, dan Daftar Rekening Bank sekaligus.
-| Disertakan info Fee agar sinkron dengan sistem WithdrawalController.
-*/
-Route::get('/wallet/dashboard', function (Illuminate\Http\Request $request) {
-    $userId = $request->query('user_id');
 
-    // 1. Cari User & Load Relasi Rekening
-    $user = App\Models\User::with('payoutMethods')->find($userId);
-
-    if (!$user) {
-        return response()->json(['status' => 'error', 'message' => 'User not found'], 404);
-    }
-
-    // 2. Ambil 20 Transaksi Terbaru (Sinkron dengan TransactionController)
-    $transactions = App\Models\Transaction::where('user_id', $userId)
-        ->orderBy('created_at', 'desc')
-        ->limit(20)
-        ->get(); // [FIX] Menggunakan -> bukan .
-
-    return response()->json([
-        'status' => true,
-        'data' => [
-            'balance' => (int) $user->wallet_balance, //
-            'reputation_points' => (int) $user->reputation_points, //
-            'tier' => $user->getTierNameAttribute(), //
-            'transactions' => $transactions,
-            'unread_notifications_count' => $user->unreadNotifications()->count(),
-
-            // --- DATA TAMBAHAN UNTUK FITUR WITHDRAW ---
-            'payout_methods' => $user->payoutMethods, // Daftar Bank User
-            'service_fee_pct' => 0.05, // Fee 5% (Sinkron dengan WithdrawalController)
-            'min_withdraw' => 50000 // Minimal penarikan
-        ]
-    ]);
-});
 
 
 
@@ -480,10 +465,3 @@ Route::get('/categories', [BountyController::class, 'getCategories']);
 Route::get('/leaderboard', [LeaderboardController::class, 'index']);
 Route::get('/payout-methods', [PayoutMethodController::class, 'index']);
 
-Route::get('/cek-koneksi-cloud', function() {
-    return response()->json([
-        'file_config_lengkap' => config('cloudinary'), // Tanpa .php
-        'hanya_url' => config('cloudinary.cloud_url'), // Spesifik ambil url
-        'env_langsung' => env('CLOUDINARY_URL'),
-    ]);
-});

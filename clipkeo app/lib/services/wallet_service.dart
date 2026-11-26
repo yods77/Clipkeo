@@ -16,35 +16,30 @@ class WalletService {
 Future<Map<String, String>> _getHeaders() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('token');
-    print("🔑 [TOKEN] Menggunakan Token: $token"); // CCTV TOKEN
-    return {
-      'Authorization': 'Bearer $token',
-      'Accept': 'application/json',
-    };
+    final headers = <String, String>{'Accept': 'application/json'};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
   }
 
   // --- 1. CEK STATUS PIN ---
   Future<bool> checkPinStatus() async {
     try {
-      print("🚀 [CHECK PIN] Sedang mengecek status PIN ke Server...");
       final headers = await _getHeaders();
       final response = await http.get(
         Uri.parse('$baseUrl/wallet/check-pin'),
         headers: headers,
       );
 
-      print("📥 [CHECK PIN] Response Code: ${response.statusCode}");
-      print("📄 [CHECK PIN] Body: ${response.body}");
 
       if (response.statusCode == 200) {
         var data = jsonDecode(response.body);
         bool status = data['has_pin'] ?? false;
-        print("✅ [CHECK PIN] Hasil: User ${status ? 'SUDAH' : 'BELUM'} punya PIN");
         return status;
       }
       return false;
-    } catch (e) {
-      print("❌ [CHECK PIN ERROR]: $e");
+    } catch (_) {
       return false;
     }
   }
@@ -52,7 +47,6 @@ Future<Map<String, String>> _getHeaders() async {
   // --- 2. SETUP PIN BARU ---
   Future<bool> setupPin(String newPin) async {
     try {
-      print("🚀 [SETUP PIN] Mengirim PIN baru ke Server...");
       final headers = await _getHeaders();
       final response = await http.post(
         Uri.parse('$baseUrl/wallet/setup-pin'),
@@ -63,16 +57,12 @@ Future<Map<String, String>> _getHeaders() async {
         },
       );
 
-      print("📥 [SETUP PIN] Response Code: ${response.statusCode}");
-      print("📄 [SETUP PIN] Body: ${response.body}");
 
       if (response.statusCode == 200) {
-        print("✅ [SETUP PIN] Berhasil disimpan!");
         return true;
       }
       return false;
-    } catch (e) {
-      print("❌ [SETUP PIN ERROR]: $e");
+    } catch (_) {
       return false;
     }
   }
@@ -83,19 +73,19 @@ Future<Map<String, String>> _getHeaders() async {
    */
   Future<Map<String, dynamic>> getWalletDashboard() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? userId = prefs.getString('user_id');
+      final headers = await _getHeaders();
+      if (!headers.containsKey('Authorization')) return {};
 
       final response = await http.get(
-        Uri.parse('$baseUrl/wallet/dashboard?user_id=$userId'),
+        Uri.parse('$baseUrl/wallet/dashboard'),
+        headers: headers,
       );
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body)['data'];
       }
       return {};
-    } catch (e) {
-      print("Error Wallet: $e");
+    } catch (_) {
       return {};
     }
   }
@@ -107,31 +97,22 @@ Future<Map<String, String>> _getHeaders() async {
    */
   Future<List<dynamic>> getPayoutMethods() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? userId = prefs.getString('user_id');
-
-      // 🔥 FIX SEMENTARA: JIKA NULL, PAKAI ID DUMMY DARI DATABASE 🔥
-      // Saya ambil ID 47 (Derry Anggara) dari screenshot database Bosku
-      if (userId == null) {
-        print("⚠️ User ID Null. Menggunakan ID Testing: 47");
-        userId = "47"; 
-      }
+      final headers = await _getHeaders();
+      if (!headers.containsKey('Authorization')) return [];
 
       final response = await http.get(
-        Uri.parse('$baseUrl/payout-methods?user_id=$userId'),
+        Uri.parse('$baseUrl/payout-methods'),
+        headers: headers,
       );
       
-      print("🕵️ JSON DARI SERVER: ${response.body}");
 
       if (response.statusCode == 200) {
         var data = jsonDecode(response.body);
         return data['data'] ?? []; 
       } else {
-        print("⚠️ Gagal ambil bank: ${response.body}");
         return [];
       }
-    } catch (e) {
-      print("❌ Error Koneksi: $e");
+    } catch (_) {
       return [];
     }
   }
@@ -142,38 +123,26 @@ Future<Map<String, String>> _getHeaders() async {
    */
   Future<bool> requestWithdraw({required String amount, required int methodId}) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? userId = prefs.getString('user_id');
-      String? token = prefs.getString('token');
+      final headers = await _getHeaders();
+      if (!headers.containsKey('Authorization')) return false;
 
-      print("🚀 [START] MENGIRIM REQUEST WITHDRAW...");
-      print("👉 URL: $baseUrl/wallet/withdraw");
-      print("👉 Token Ada? ${token != null ? 'YA' : 'TIDAK'}");
-      print("👉 Data Kirim: Amount=$amount, Method=$methodId");
 
       final response = await http.post(
         Uri.parse('$baseUrl/wallet/withdraw'),
         body: {
-          'user_id': userId,           
-          'amount': amount,            
+          'amount': amount,
           'payout_method_id': methodId.toString(),
         },
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json', // <--- KUNCI RAHASIANYA!
-        },
+        headers: headers,
       );
 
-      print("📥 [RESPONSE] Status Code: ${response.statusCode}");
-      print("📄 [RESPONSE] Body: ${response.body}");
       
       if (response.statusCode == 200) {
         return true;
       } else {
         return false;
       }
-    } catch (e) {
-      print("❌ [ERROR KONEKSI]: $e");
+    } catch (_) {
       return false;
     }
   }

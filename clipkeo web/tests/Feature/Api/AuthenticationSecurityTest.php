@@ -163,4 +163,51 @@ class AuthenticationSecurityTest extends TestCase
             'otp' => '123456',
         ])->assertStatus(429);
     }
+
+    public function test_wallet_endpoints_require_authentication(): void
+    {
+        $this->getJson('/api/wallet/dashboard')->assertUnauthorized();
+        $this->getJson('/api/payout-methods')->assertUnauthorized();
+    }
+
+    public function test_wallet_endpoints_only_return_the_authenticated_users_data(): void
+    {
+        $user = $this->createUser();
+        $otherUser = $this->createUser();
+
+        $user->update(['wallet_balance' => 123456]);
+        $otherUser->update(['wallet_balance' => 987654]);
+
+        $user->payoutMethods()->create([
+            'bank_name' => 'Bank A',
+            'account_number' => '1111111111',
+            'account_name' => 'Account Owner A',
+            'is_primary' => true,
+        ]);
+        $otherUser->payoutMethods()->create([
+            'bank_name' => 'Bank B',
+            'account_number' => '9999999999',
+            'account_name' => 'Account Owner B',
+            'is_primary' => true,
+        ]);
+
+        $token = $user->createToken('wallet-security-test')->plainTextToken;
+        $this->withHeader('Authorization', 'Bearer ' . $token);
+
+        $this->getJson('/api/wallet/dashboard?user_id=' . $otherUser->id)
+            ->assertOk()
+            ->assertJsonPath('data.balance', 123456)
+            ->assertJsonCount(1, 'data.payout_methods')
+            ->assertJsonPath('data.payout_methods.0.account_number', '1111111111');
+
+        $this->getJson('/api/payout-methods?user_id=' . $otherUser->id)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.account_number', '1111111111');
+    }
+
+    public function test_cloudinary_debug_endpoint_is_not_exposed(): void
+    {
+        $this->getJson('/api/cek-koneksi-cloud')->assertNotFound();
+    }
 }

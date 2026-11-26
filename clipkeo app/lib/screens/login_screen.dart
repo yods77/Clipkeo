@@ -104,8 +104,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // --- FUNGSI PEMBANTU: SIMPAN SESSION ---
   Future<void> _performSaveSession(Map<String, dynamic> result) async {
-    print("💾 [SAVE SESSION] Memulai proses simpan data...");
-    print("📦 [DEBUG DATA] Data diterima: $result"); // Lihat isi data mentah
 
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -115,13 +113,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // 1. Coba ambil dari result['user'] (Format standar)
       if (result['user'] != null) {
-        print("✅ [LOGIC] Menemukan format result['user']");
         userIdToSave = result['user']['id'].toString();
         userNameToSave = result['user']['name'].toString();
       }
       // 2. Coba ambil dari result['data']['user'] (Format nested)
       else if (result['data'] != null && result['data']['user'] != null) {
-        print("✅ [LOGIC] Menemukan format result['data']['user']");
         userIdToSave = result['data']['user']['id'].toString();
         userNameToSave = result['data']['user']['name'].toString();
       }
@@ -134,7 +130,6 @@ class _LoginScreenState extends State<LoginScreen> {
       // EKSEKUSI SIMPAN
       if (userIdToSave != null) {
         await prefs.setString('user_id', userIdToSave);
-        print("💾 [SUCCESS] User ID ($userIdToSave) BERHASIL DISIMPAN!");
 
         if (userNameToSave != null) {
           await prefs.setString('user_name', userNameToSave);
@@ -142,13 +137,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (tokenToSave != null) {
           await prefs.setString('token', tokenToSave);
-          print("🔑 [SUCCESS] Token BERHASIL DISIMPAN!");
         }
       } else {
-        print("⚠️ [WARNING] Gagal menemukan ID User di dalam JSON server.");
       }
-    } catch (e) {
-      print("❌ [ERROR CRITICAL] Gagal Simpan Session: $e");
+    } catch (_) {
     }
   }
 
@@ -196,14 +188,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
     // 2. Panggil Service Login
     // Debug Print untuk melihat respon asli di Console
-    print("🚀 Melakukan Login ke: ${_authService.baseUrl}");
 
     Map<String, dynamic> result = await _authService.login(
       _emailController.text,
       _passwordController.text,
     );
 
-    print("🕵️ HASIL RESULT: $result"); // <--- Cek ini di console nanti
 
     setState(() => _isLoading = false);
 
@@ -214,10 +204,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Cek apakah benar-benar user baru (Namanya kosong)
       if (result['is_new_user'] == true) {
-        print("⚠️ Terdeteksi User Baru (Nama Kosong) -> Ke Register");
         _navigateToRegister();
       } else {
-        print("✅ User Lama -> Ke Dashboard");
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const MainScreen()),
@@ -228,7 +216,6 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       String message =
           result['message']?.toString().toLowerCase() ?? "unknown error";
-      print("❌ LOGIN GAGAL: $message");
 
       // Skenario 1: Password Salah
       if (message.contains("password") ||

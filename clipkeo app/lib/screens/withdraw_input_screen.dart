@@ -78,7 +78,6 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
   }
 
   void _validatePinAndWithdraw() async {
-    print("👆 [UI] Memulai Validasi Withdraw...");
 
     // 1. VALIDASI DASAR (KODE LAMA KAMU)
     double amount =
@@ -113,30 +112,25 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
     );
 
     // 3. PANGGIL API CEK PIN
-    print("🚀 [LOGIC] Cek Status PIN ke Server...");
     bool hasPin = await _walletService.checkPinStatus();
 
     Navigator.pop(context); // Tutup Loading
-    print("🏁 [LOGIC] Status PIN: $hasPin");
 
     // 4. TENTUKAN ARAH
     if (hasPin) {
       // A. JIKA SUDAH PUNYA PIN -> Tampilkan Popup Input PIN (KODE LAMA KAMU)
-      print("➡️ [NAV] User punya PIN. Buka Dialog Input PIN.");
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => _PinInputDialog(
           onPinSuccess: () {
             // Kalau PIN Benar, Panggil fungsi withdraw ASLI
-            print("✅ [UI] PIN Benar. Eksekusi Withdraw!");
             _handleWithdraw();
           },
         ),
       );
     } else {
       // B. JIKA BELUM PUNYA PIN -> Buka Layar Setup PIN (KODE BARU)
-      print("➡️ [NAV] User BELUM punya PIN. Buka Setup PIN.");
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -176,8 +170,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
           }
         });
       }
-    } catch (e) {
-      print("❌ Error: $e");
+    } catch (_) {
       if (mounted) {
         // Kalau error, anggap list kosong biar muncul pesan error (atau handling lain)
         setState(() => _localBankList = []);
@@ -272,10 +265,6 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 
   @override
   Widget build(BuildContext context) {
-    print("========================================");
-    print("🕵️ DEBUG SCREEN: Nilai maxBalance diterima: ${widget.maxBalance}");
-    print("🕵️ DEBUG SCREEN: Tipe data: ${widget.maxBalance.runtimeType}");
-    print("========================================");
     return AppBackgroundScaffold(
       child: Column(
         children: [

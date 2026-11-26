@@ -17,12 +17,11 @@ void main() async {
   FirebaseMessaging messaging = FirebaseMessaging.instance;
 
   // 1. Minta izin notifikasi (Wajib buat Android 13+)
-  NotificationSettings settings = await messaging.requestPermission(
+  await messaging.requestPermission(
     alert: true,
     badge: true,
     sound: true,
   );
-  print('Izin User: ${settings.authorizationStatus}');
 
   // 2. Tampilkan notifikasi saat aplikasi dibuka (Foreground)
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
@@ -31,8 +30,7 @@ void main() async {
     sound: true,
   );
 
-  final fcmToken = await FirebaseMessaging.instance.getToken();
-  print("🔥 TOKEN SAYA: $fcmToken");
+  await FirebaseMessaging.instance.getToken();
 
   // 2. 🔥 WAJIB: Kunci Orientasi Layar ke Portrait (Berdiri)
   // Supaya desain tidak hancur saat HP dimiringkan
