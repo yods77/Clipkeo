@@ -28,7 +28,10 @@ class WalletWithdrawalPinTest extends TestCase
         ]);
 
         $token = $user->createToken('withdraw-pin-test')->plainTextToken;
-        $headers = ['Authorization' => 'Bearer ' . $token];
+        $headers = [
+            'Authorization' => 'Bearer ' . $token,
+            'Idempotency-Key' => '11111111-1111-4111-8111-111111111111',
+        ];
         $payload = [
             'amount' => 50000,
             'payout_method_id' => $payoutMethod->id,
