@@ -280,6 +280,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
             amount: inputAmount,
             finalAmount: finalAmount.toString(),
             bankName: selectedBank?['bank_name'] ?? "Bank",
+            withdrawalStatus: result.withdrawalStatus,
           ),
         ),
       );
