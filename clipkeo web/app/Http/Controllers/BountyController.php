@@ -300,47 +300,66 @@ class BountyController extends Controller
     {
         $this->authorizePublisher();
 
-        $bounty = Bounty::findOrFail($id);
-        if (($bounty->publisher_id ?? $bounty->user_id) !== auth()->id()) abort(403);
+        $result = DB::transaction(function () use ($id) {
+            // Lock the campaign so concurrent cancellation requests cannot refund it twice.
+            $bounty = Bounty::whereKey($id)->lockForUpdate()->firstOrFail();
 
-        if ($bounty->status === 'completed' || $bounty->remaining_budget <= 100) {
-            return back()->with('error', 'Tidak bisa dibatalkan (sudah selesai/budget habis).');
-        }
+            $publisherId = $bounty->publisher_id ?? $bounty->user_id;
+            if ($publisherId !== auth()->id()) {
+                abort(403);
+            }
 
-        if ($bounty->status === 'rejected') {
-            $bounty->delete();
-            return back()->with('success', 'Riwayat campaign yang ditolak berhasil dihapus.');
-        }
+            if ($bounty->status === 'completed' || (float) $bounty->remaining_budget <= 100) {
+                return 'not_cancellable';
+            }
 
-        $activeSubs = $bounty->submissions()->whereIn('status', ['pending', 'approved'])->where('payout_status', 'unpaid')->exists();
-        if ($activeSubs) {
-            return back()->with('error', 'Selesaikan dulu submission yang pending/belum dibayar.');
-        }
+            if ($bounty->status === 'rejected') {
+                $bounty->delete();
+                return 'deleted';
+            }
 
-        DB::transaction(function () use ($bounty) {
-            // [UPDATE] Refund Murni Sisa Budget (Tanpa Fee)
-            $remainingBudget = $bounty->remaining_budget;
-            $totalRefund = $remainingBudget; // 100% Sisa dikembalikan
+            $activeSubs = $bounty->submissions()
+                ->whereIn('status', ['pending', 'approved'])
+                ->where('payout_status', 'unpaid')
+                ->lockForUpdate()
+                ->exists();
 
-            if ($totalRefund > 0) {
-                // Refund ke Wallet Publisher
-                $bounty->publisher->increment('wallet_balance', (float) $totalRefund);
+            if ($activeSubs) {
+                return 'active_submissions';
+            }
 
-                // Catat Transaksi Refund
+            $remainingBudget = (float) $bounty->remaining_budget;
+
+            if ($remainingBudget > 0) {
+                $publisher = User::whereKey($publisherId)->lockForUpdate()->firstOrFail();
+                $publisher->increment('wallet_balance', $remainingBudget);
+
                 Transaction::create([
-                    'user_id' => $bounty->publisher_id,
-                    'type' => 'refund',
-                    'amount' => $totalRefund,
+                    'user_id' => $publisherId,
+                    'type' => Transaction::TYPE_BOUNTY_REFUND,
+                    'amount' => $remainingBudget,
+                    'currency' => 'IDR',
                     'description' => "Refund Budget Campaign: {$bounty->title}",
                     'reference_id' => 'REF-' . date('Ymd') . '-' . $bounty->id . '-' . Str::random(4),
-                    'status' => 'success'
+                    'status' => 'success',
                 ]);
             }
-            // Ubah status jadi completed
-            $bounty->update(['status' => 'completed']);
+
+            // Clear the held amount so the refunded budget cannot be counted or refunded again.
+            $bounty->update([
+                'status' => 'completed',
+                'remaining_budget' => 0,
+            ]);
+
+            return 'refunded';
         });
 
-        return back()->with('success', 'Campaign dibatalkan & sisa budget dikembalikan ke saldo.');
+        return match ($result) {
+            'deleted' => back()->with('success', 'Riwayat campaign yang ditolak berhasil dihapus.'),
+            'active_submissions' => back()->with('error', 'Selesaikan dulu submission yang pending/belum dibayar.'),
+            'not_cancellable' => back()->with('error', 'Tidak bisa dibatalkan (sudah selesai/budget habis).'),
+            default => back()->with('success', 'Campaign dibatalkan & sisa budget dikembalikan ke saldo.'),
+        };
     }
 
     /*
