@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Transaction;
 use App\Models\User;
-use App\Models\WithdrawalRequest;
 use App\Notifications\FinancialStatusNotification; 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
