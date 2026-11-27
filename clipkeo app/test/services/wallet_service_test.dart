@@ -11,6 +11,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({
       'token': 'test-api-token',
+      'user_id': 'test-user-1',
     });
   });
 
