@@ -9,14 +9,41 @@ import '../widgets/app_background_scaffold.dart';
 class WithdrawSuccessScreen extends StatelessWidget {
   final String amount;
   final String finalAmount; // [FIX] Definisi variabel baru
-  final String bankName;    // [FIX] Definisi variabel baru
+  final String bankName;
+  final String? withdrawalStatus;
 
   const WithdrawSuccessScreen({
-    super.key, 
-    required this.amount, 
-    required this.finalAmount, 
-    required this.bankName
+    super.key,
+    required this.amount,
+    required this.finalAmount,
+    required this.bankName,
+    this.withdrawalStatus,
   });
+
+  String get _statusTitle => switch (withdrawalStatus) {
+    'completed' => 'Penarikan Berhasil',
+    'processing' => 'Penarikan Diproses',
+    'rejected' => 'Penarikan Ditolak',
+    _ => 'Permintaan Penarikan Diterima',
+  };
+
+  String _statusDescription() {
+    final netAmount = NumberFormat.currency(
+      locale: 'id',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    ).format(double.parse(finalAmount));
+
+    return switch (withdrawalStatus) {
+      'completed' => 'Dana bersih sebesar $netAmount telah selesai diproses.',
+      'processing' =>
+        'Dana bersih sebesar $netAmount sedang diproses oleh penyedia pembayaran.',
+      'rejected' =>
+        'Permintaan sebelumnya ditolak. Periksa saldo dan riwayat transaksi untuk memastikan pengembalian dana.',
+      _ =>
+        'Dana bersih sebesar $netAmount menunggu persetujuan Admin. Dana belum dikirim ke rekening.',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +100,7 @@ class WithdrawSuccessScreen extends StatelessWidget {
                 child: Column(
                   children: [
                     Text(
-                      "Permintaan Penarikan Diterima",
+                      _statusTitle,
                       style: TextStyle(
                         fontSize: 24.sp,
                         fontWeight: FontWeight.bold,
@@ -82,7 +109,7 @@ class WithdrawSuccessScreen extends StatelessWidget {
                     ),
                     SizedBox(height: 10.h),
                     Text(
-                      "Dana bersih sebesar ${NumberFormat.currency(locale: 'id', symbol: 'Rp ', decimalDigits: 0).format(double.parse(finalAmount.toString()))} \nsedang menunggu persetujuan Admin. Dana belum dikirim ke rekening.", 
+                      _statusDescription(),
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 14.sp, color: const Color.fromARGB(255, 41, 41, 41)),
                     ),
