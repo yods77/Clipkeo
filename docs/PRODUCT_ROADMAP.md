@@ -308,3 +308,79 @@ Tambahkan entri terbaru di bawah ini setiap kali roadmap berubah atau keputusan 
 | 2026-11-27 | Roadmap awal dibuat dari pemeriksaan struktur Flutter/Laravel, route, controller, model, dan UI Admin pada branch `fix/security-authentication`. | Baseline; perlu validasi dengan working tree lokal dan pengujian end-to-end |
 | 2026-11-27 | Financial/security hardening committed: canonical ledger types, atomic campaign refund and web/API withdrawal debits, server-side withdrawal PIN, webhook idempotency, route hardening, and regression tests. | Code committed to `fix/security-authentication`; tests and Flutter analysis not yet executed. Next: Xendit approval idempotency and one withdrawal-ledger lifecycle. |
 | 2026-11-27 | Added per-user API withdrawal idempotency, persisted Flutter retry keys, pending-attempt recovery across token renewal/logout, current withdrawal status in result UI, and backend/mobile regression tests. | Committed to `fix/security-authentication`; implementation tests pending local execution. API now requires `Idempotency-Key`, so backend and updated mobile app must be released together. |
+
+
+## 12. Progress Tracker — 2026-11-27
+
+Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, implementasi yang sudah ada tetapi masih menunggu verifikasi, dan pekerjaan yang belum dilakukan.
+
+**Legenda:** [x] selesai dan ada bukti; [~] implementasi/tes sebagian, belum menjadi gate lulus; [ ] belum selesai.
+
+### A. P0 — Financial Integrity & Security
+
+- [x] Perbaikan refund Admin untuk campaign uji ID 1: campaign ditolak, saldo Publisher kembali Rp1.000.000, dan satu transaksi `bounty_refund` tercatat. Jangan ulangi refund pada campaign uji tersebut.
+- [~] Normalisasi tipe ledger canonical (`bounty_prize`, `bounty_refund`, dan tipe ENUM lain) serta penyesuaian arah pemasukan/pengeluaran berdasarkan pemilik transaksi sudah ditambahkan ke branch; rekonsiliasi seluruh jalur dan wallet masih perlu diselesaikan.
+- [~] Refund campaign menggunakan transaksi database/row lock dan mengosongkan `remaining_budget` pada alur yang sudah diperbaiki; regression test lengkap masih perlu dijalankan setelah sinkronisasi lokal.
+- [~] Withdrawal PIN server-side, validasi ownership payout method, atomic debit, dan proteksi webhook idempotency sudah diimplementasikan pada branch; verifikasi menyeluruh pada environment lokal/staging masih diperlukan.
+- [~] API withdrawal idempotency per user dan retry recovery di Flutter sudah ditambahkan. Backend dan Flutter harus dirilis berpasangan karena API mewajibkan header `Idempotency-Key`; test pada versi kode terbaru masih harus dijalankan.
+- [ ] Idempotency approval transfer Xendit oleh Admin dan satu lifecycle ledger withdrawal yang konsisten untuk Web/API.
+- [ ] Rekonsiliasi saldo, ledger, fee, status withdrawal, dan hasil webhook untuk semua skenario sukses/gagal/duplikat.
+- [ ] Audit menyeluruh SSRF pada resolver URL video, validasi file upload, webhook secret/signature, dan seluruh route/ownership API.
+- [ ] Menetapkan serta menguji satu kebijakan fee yang sama pada API, UI, invoice, dan backend; jangan mengubah tarif bisnis tanpa persetujuan.
+
+### B. P1 — Core User Journey
+
+**Clipper / Android**
+- [x] Instalasi aplikasi Android, Google Login, persistensi sesi, dashboard, profile, wallet kosong, dan halaman submissions pernah diuji dan dilaporkan berhasil.
+- [x] Submission #1 pada database lokal berstatus `approved`, memiliki 10.000 views, `last_paid_views=10000`, `prize_amount=Rp50.000`, dan `approved_at` terisi.
+- [~] Migration `video_id` telah ditambahkan ke branch untuk memperbaiki query submission; eksekusi migration dan pengujian ulang pada database lokal harus dicatat setelah diverifikasi.
+- [~] Upload bukti analytics dan tampilan submission pada alur Publisher/Admin telah dilaporkan diuji; retry upload, error state, dan seluruh edge case belum dinyatakan lulus.
+- [ ] Rekonsiliasi saldo Clipper dan transaksi reward untuk Submission #1.
+- [ ] Uji pencarian/filter/detail campaign dengan data campaign aktif yang tersedia.
+- [ ] Uji wallet statement, withdrawal, retry setelah timeout, token renewal, dan status Xendit end-to-end.
+
+**Publisher / Web**
+- [x] Publisher berhasil login dan membuat campaign uji; validasi field wajib berjalan.
+- [~] Alur review submission dan reward sudah menghasilkan record approved serta prize Rp50.000 pada Submission #1; rekonsiliasi saldo, ledger Publisher, dan remaining budget masih terbuka.
+- [ ] Uji campaign creation, hold budget, approval/rejection, pembatalan/refund, dan laporan performa secara end-to-end dengan data uji baru yang aman.
+- [ ] Uji filter/inbox submission, alasan penolakan, dan seluruh state loading/empty/error.
+
+**Admin / Web**
+- [x] Admin berhasil login dan membuka halaman Admin.
+- [x] Aksi Tolak & Refund pada campaign uji ID 1 pernah berhasil satu kali; jangan diulang.
+- [~] Route hardening dan regression tests otorisasi Admin sudah ditambahkan ke branch; audit route dan test versi terbaru masih diperlukan.
+- [ ] Uji Admin Takeover dan pastikan tidak menghasilkan payout ganda.
+- [ ] Uji persetujuan deposit/withdrawal, audit trail, dan pembatasan akses role biasa.
+
+### C. Test automation dan kualitas aplikasi
+
+- [x] Baseline Laravel sebelumnya: 64 tests passed dan 249 assertions sebelum implementasi API withdrawal idempotency terbaru.
+- [~] Test baru untuk withdrawal approval/webhook, ownership, PIN, normalisasi tipe transaksi, API idempotency, dan schema submission sudah ditambahkan/diubah di branch; jalankan ulang seluruh suite pada HEAD terbaru.
+- [ ] Jalankan seluruh `php artisan test`, lint PHP yang berubah, `flutter analyze`, `flutter test`, dan `flutter build apk --debug`; catat output aktual.
+- [ ] Uji staging untuk timeout setelah commit, retry dengan idempotency key sama, key/payload berbeda, PIN salah/benar, webhook duplikat, dan callback status tidak berurutan.
+
+### D. P2 — Scale & Reliability
+
+- [ ] CI/CD dan staging environment dengan release/rollback checklist.
+- [ ] Load test API dan database, query/index review, serta uji konkurensi mutasi saldo.
+- [ ] Backup otomatis dan restore drill.
+- [ ] Monitoring API, queue, webhook, upload, dan crash/error Flutter.
+- [ ] Private media storage, signed URL, dan kebijakan retensi bukti analytics.
+
+### E. P3 — Growth
+
+- [ ] Referral dan creator invitation dengan anti-abuse.
+- [ ] Campaign templates dan rekomendasi campaign untuk Publisher.
+- [ ] Personalized campaign feed.
+- [ ] Publisher performance insights dan benchmark.
+- [ ] Gamification dan loyalty setelah unit economics tervalidasi.
+
+### F. Pengujian aktif berikutnya
+
+1. Selesaikan rekonsiliasi Submission #1: baca Campaign #2 (`reward_amount`, `remaining_budget`), saldo user ID 1 dan 2, serta transaksi `bounty_prize` pada kedua akun.
+2. Audit semantik `payout_status`: kode saat ini menentukan `paid/partial` berdasarkan sisa budget campaign (`remaining_budget <= 100`), bukan semata-mata status pelunasan reward submission.
+3. Pastikan migration penambah `approved_at` ikut tercatat dalam repository dan migration video_id berstatus benar pada database lokal.
+4. Setelah rekonsiliasi selesai, buat submission uji baru untuk Admin Takeover; jangan mengulang approve atau refund pada data uji yang sudah final.
+5. Lanjutkan ke withdrawal Web/API dan simulasi webhook Xendit; gunakan data staging/test, bukan transfer uang sungguhan tanpa persetujuan.
+
+**Aturan pencatatan:** status [x] hanya boleh dipakai untuk pekerjaan yang benar-benar telah diuji/dibuktikan. Implementasi yang baru ada di branch tetapi belum dijalankan tetap [~]. Hasil lokal yang belum dilaporkan tidak boleh dianggap lulus.
