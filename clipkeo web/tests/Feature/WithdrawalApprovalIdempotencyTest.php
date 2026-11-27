@@ -85,13 +85,18 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
         [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
         $postAttempts = 0;
         $lookupAttempts = 0;
+        $lookupExternalIds = [];
         $externalId = 'WD-testing-' . $withdrawal->id;
 
-        Http::fake(function ($request) use (&$postAttempts, &$lookupAttempts, $externalId) {
+        Http::fake(function ($request) use (&$postAttempts, &$lookupAttempts, &$lookupExternalIds, $externalId) {
             if ($request->method() === 'GET') {
                 $lookupAttempts++;
+                $lookupExternalId = (string) $request['external_id'];
+                $lookupExternalIds[] = $lookupExternalId;
 
-                if ($lookupAttempts === 1) {
+                // The first lookup misses. On retry, the new reference is found;
+                // the legacy reference is still checked and must not match it.
+                if ($lookupExternalId !== $externalId || $lookupAttempts === 1) {
                     return Http::response([], 200);
                 }
 
@@ -124,7 +129,12 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
 
         Http::assertSentCount(3);
         $this->assertSame(1, $postAttempts);
-        $this->assertSame(2, $lookupAttempts);
+        $this->assertSame(3, $lookupAttempts);
+        $this->assertSame([
+            $externalId,
+            $externalId,
+            'WD-' . $withdrawal->id,
+        ], $lookupExternalIds);
         Http::assertSent(function ($request) use ($withdrawal) {
             return $request->method() === 'POST'
                 && $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id);
