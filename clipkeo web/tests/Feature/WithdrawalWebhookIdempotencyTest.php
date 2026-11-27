@@ -114,7 +114,7 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
             'bank_info' => 'Bank Test (1234567890) a/n Test Account',
         ]);
 
-        $externalId = 'WD-' . $withdrawal->id;
+        $externalId = 'WD-testing-' . $withdrawal->id;
 
         $transaction = Transaction::create([
             'user_id' => $user->id,
