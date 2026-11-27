@@ -7,7 +7,6 @@ use App\Mail\WithdrawalInvoiceMail;
 use App\Models\WithdrawalRequest;
 use App\Models\Transaction;
 use App\Models\PayoutMethod;
-use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -15,8 +14,11 @@ use Illuminate\Support\Facades\Hash; // Import Hash tetap ada
 use App\Notifications\AdminActivityNotification;
 use App\Notifications\FinancialStatusNotification;
 use App\Models\User;
-use Xendit\Xendit;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use App\Services\WithdrawalLedgerService;
+use Throwable;
 
 class WithdrawalController extends Controller
 {
@@ -51,11 +53,7 @@ class WithdrawalController extends Controller
             return back()->withErrors(['pin' => 'PIN Keamanan salah. Silakan coba lagi.']);
         }
 
-        $feePercentage = 0.10;
-
-        // Lock saldo dan rekening dalam satu transaksi agar request paralel tidak
-        // dapat memakai saldo yang sama atau memilih rekening milik user lain.
-        $result = DB::transaction(function () use ($request, $user, $feePercentage) {
+        $result = DB::transaction(function () use ($request, $user) {
             $lockedUser = User::whereKey($user->id)
                 ->lockForUpdate()
                 ->firstOrFail();
@@ -71,15 +69,15 @@ class WithdrawalController extends Controller
                 ]);
             }
 
-            $amount = (float) $request->amount;
+            $amount = round((float) $request->amount, 2);
             if ((float) $lockedUser->wallet_balance < $amount) {
                 throw ValidationException::withMessages([
                     'amount' => 'Saldo tidak cukup untuk melakukan penarikan ini.',
                 ]);
             }
 
-            $feeAmount = $amount * $feePercentage;
-            $finalAmount = $amount - $feeAmount;
+            $feeAmount = round($amount * 0.10, 2);
+            $finalAmount = round($amount - $feeAmount, 2);
 
             $withdrawal = WithdrawalRequest::create([
                 'user_id' => $lockedUser->id,
@@ -93,6 +91,9 @@ class WithdrawalController extends Controller
 
             $lockedUser->decrement('wallet_balance', $amount);
 
+            // Both the net payout and the fee are recorded as pending ledger rows.
+            app(WithdrawalLedgerService::class)->ensurePendingLedger($withdrawal);
+
             return [
                 'withdrawal' => $withdrawal,
                 'final_amount' => $finalAmount,
@@ -102,25 +103,26 @@ class WithdrawalController extends Controller
         $withdrawal = $result['withdrawal'];
         $finalAmount = $result['final_amount'];
 
-        // Notifikasi dilakukan setelah commit; kegagalan notifikasi tidak boleh
-        // membatalkan atau membuat user mengulang transaksi keuangan.
+        // Notifications are sent only after the wallet transaction has committed.
         try {
-            $admins = User::where('role', 'admin')->get();
-            foreach ($admins as $admin) {
+            foreach (User::where('role', 'admin')->get() as $admin) {
                 $admin->notify(new AdminActivityNotification($withdrawal, 'withdraw_request'));
             }
 
             $withdrawal->load('user');
-            $withdrawal->user?->notify(new FinancialStatusNotification($withdrawal, 'withdrawal', 'pending'));
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning(
-                'Gagal mengirim notifikasi withdrawal request: ' . $e->getMessage()
+            $withdrawal->user?->notify(
+                new FinancialStatusNotification($withdrawal, 'withdrawal', 'pending')
             );
+        } catch (Throwable $e) {
+            Log::warning('Gagal mengirim notifikasi withdrawal request.', [
+                'withdrawal_id' => $withdrawal->id,
+                'exception' => $e->getMessage(),
+            ]);
         }
 
         return redirect()->route('dashboard')->with(
             'success',
-            'Penarikan diproses! Dana bersih Rp ' . number_format($finalAmount, 0, ',', '.') . ' akan segera dikirim.'
+            'Penarikan diajukan. Dana bersih Rp ' . number_format($finalAmount, 0, ',', '.') . ' menunggu persetujuan Admin.'
         );
     }
 
@@ -132,20 +134,64 @@ class WithdrawalController extends Controller
     */
     public function approve($id)
     {
-        $wd = WithdrawalRequest::findOrFail($id);
-        if ($wd->status !== 'pending')
-            return back();
-
-        $method = \App\Models\PayoutMethod::find($wd->payout_method_id);
-
-        if (!$method) {
-            return back()->with('error', 'Gagal: Rekening tujuan telah dihapus oleh User.');
+        $secretKey = (string) config('services.xendit.secret_key');
+        if ($secretKey === '') {
+            return back()->with('error', 'Xendit belum dikonfigurasi. Withdrawal tetap menunggu dan saldo tidak berubah.');
         }
 
-        Xendit::setApiKey(env('XENDIT_SECRET_KEY'));
+        $prepared = DB::transaction(function () use ($id) {
+            $withdrawal = WithdrawalRequest::whereKey($id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $rawBank = strtoupper(trim($method->bank_name));
+            if (!in_array($withdrawal->status, ['pending', 'processing'], true)) {
+                return ['state' => 'closed'];
+            }
 
+            $method = PayoutMethod::whereKey($withdrawal->payout_method_id)
+                ->where('user_id', $withdrawal->user_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$method) {
+                return ['state' => 'missing_method'];
+            }
+
+            $ledger = app(WithdrawalLedgerService::class)
+                ->ensurePendingLedger($withdrawal);
+
+            // A provider ID means Xendit already accepted this disbursement.
+            // Never submit a second transfer; wait for its webhook.
+            if (!empty($ledger->external_ref)) {
+                return ['state' => 'already_sent'];
+            }
+
+            $withdrawal->update(['status' => 'processing']);
+
+            return [
+                'state' => 'ready',
+                'withdrawal_id' => $withdrawal->id,
+                'external_id' => 'WD-' . $withdrawal->id,
+                'amount' => (int) round((float) $withdrawal->amount_final),
+                'bank_name' => $method->bank_name,
+                'account_number' => $method->account_number,
+                'account_name' => $method->account_name,
+            ];
+        });
+
+        if ($prepared['state'] === 'closed') {
+            return back()->with('error', 'Withdrawal ini sudah selesai atau ditolak.');
+        }
+
+        if ($prepared['state'] === 'missing_method') {
+            return back()->with('error', 'Rekening tujuan tidak ditemukan atau bukan milik pengguna.');
+        }
+
+        if ($prepared['state'] === 'already_sent') {
+            return back()->with('success', 'Withdrawal sudah diterima Xendit. Menunggu konfirmasi webhook; transfer tidak dikirim ulang.');
+        }
+
+        $rawBank = strtoupper(trim($prepared['bank_name']));
         $bankMap = [
             'GOPAY' => 'GOPAY',
             'GOPAY DANA' => 'DANA',
@@ -155,73 +201,137 @@ class WithdrawalController extends Controller
             'BANK BRI' => 'BRI',
         ];
 
-        $finalBankCode = isset($bankMap[$rawBank]) ? $bankMap[$rawBank] : $rawBank;
-        $cleanAccountNumber = preg_replace('/[^0-9]/', '', $method->account_number);
-        $amount = (int) $wd->amount_final;
-        $externalRef = 'WD-' . time() . '-' . $wd->id;
+        $bankCode = $bankMap[$rawBank] ?? $rawBank;
+        $accountNumber = preg_replace('/[^0-9]/', '', $prepared['account_number']);
+        $externalId = $prepared['external_id'];
 
         $params = [
-            'external_id' => $externalRef,
-            'amount' => $amount,
-            'bank_code' => $finalBankCode,
-            'account_holder_name' => $method->account_name,
-            'account_number' => $cleanAccountNumber,
+            'external_id' => $externalId,
+            'amount' => $prepared['amount'],
+            'bank_code' => $bankCode,
+            'account_holder_name' => $prepared['account_name'],
+            'account_number' => $accountNumber,
             'description' => 'Withdrawal Clipkeo',
         ];
 
         try {
-            \Illuminate\Support\Facades\Log::info('Mencoba Transfer Xendit:', $params);
-
-            $createDisbursement = \Xendit\Disbursements::create($params);
-
-            $wd->update(['status' => 'processing']);
-
-            Transaction::create([
-                'user_id' => $wd->user_id,
-                'type' => 'withdrawal',
-                'amount' => $wd->amount_final,
-                'currency' => 'IDR',
-                'description' => 'Withdraw diproses ke ' . $finalBankCode,
-                'reference_id' => $externalRef,
-                'external_ref' => $createDisbursement['id'],
-                'status' => 'pending',
-                'bank_code' => $finalBankCode,
-                'account_number' => $cleanAccountNumber,
-                'account_holder' => $method->account_name,
+            // X-IDEMPOTENCY-KEY and external_id remain stable across retries.
+            $response = Http::asForm()
+                ->withBasicAuth($secretKey, '')
+                ->withHeaders(['X-IDEMPOTENCY-KEY' => $externalId])
+                ->timeout(30)
+                ->post('https://api.xendit.co/disbursements', $params);
+        } catch (Throwable $e) {
+            // A timeout/connection error does not prove Xendit rejected the transfer.
+            // Keep it processing; retrying with the same idempotency key is safe.
+            Log::warning('Hasil request Xendit belum dapat dipastikan.', [
+                'withdrawal_id' => $prepared['withdrawal_id'],
+                'external_id' => $externalId,
+                'exception' => $e->getMessage(),
             ]);
 
-            // Catat Fee (Optional)
-            $fee = $wd->amount_requested - $wd->amount_final;
-            if ($fee > 0) {
-                Transaction::create([
-                    'user_id' => $wd->user_id,
-                    'type' => 'platform_fee',
-                    'amount' => $fee,
-                    'currency' => 'IDR',
-                    'description' => 'Fee Penarikan',
-                    'reference_id' => 'FEE-' . $externalRef,
-                    'status' => 'success'
+            return back()->with(
+                'error',
+                'Respons Xendit belum dapat dipastikan. Status tetap diproses; ulangi proses Admin dengan referensi yang sama agar tidak membuat transfer ganda.'
+            );
+        }
+
+        $payload = $response->json() ?? [];
+
+        if ($response->successful()) {
+            $providerId = $payload['id'] ?? null;
+
+            DB::transaction(function () use ($prepared, $externalId, $providerId, $bankCode, $accountNumber) {
+                $withdrawal = WithdrawalRequest::whereKey($prepared['withdrawal_id'])
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$withdrawal) {
+                    return;
+                }
+
+                $ledger = app(WithdrawalLedgerService::class)
+                    ->ensurePendingLedger($withdrawal, $externalId);
+
+                $ledger->update([
+                    'external_ref' => $providerId ?: $ledger->external_ref,
+                    'bank_code' => $bankCode,
+                    'account_number' => $accountNumber,
+                    'account_holder' => $prepared['account_name'],
+                ]);
+            });
+
+            try {
+                $withdrawal = WithdrawalRequest::with(['user', 'transaction'])
+                    ->find($prepared['withdrawal_id']);
+
+                if ($withdrawal?->user?->email) {
+                    Mail::to($withdrawal->user->email)->send(new WithdrawalInvoiceMail($withdrawal));
+                }
+            } catch (Throwable $mailError) {
+                Log::warning('Gagal mengirim invoice withdrawal.', [
+                    'withdrawal_id' => $prepared['withdrawal_id'],
+                    'exception' => $mailError->getMessage(),
                 ]);
             }
 
-            try {
-                // Memuat relasi agar data transaksi tersedia di email
-                $wd->load(['user', 'transaction']);
+            return back()->with(
+                'success',
+                'Permintaan transfer diterima Xendit. Dana sedang menunggu konfirmasi bank melalui webhook.'
+            );
+        }
 
-                Mail::to($wd->user->email)->send(new WithdrawalInvoiceMail($wd));
+        $errorCode = (string) (
+            $payload['error_code']
+            ?? $payload['errorCode']
+            ?? $payload['message']
+            ?? 'XENDIT_REQUEST_ERROR'
+        );
 
-                \Illuminate\Support\Facades\Log::info('Email Invoice Berhasil Dikirim ke: ' . $wd->user->email);
-            } catch (\Exception $mailEx) {
-                // Jika email gagal, jangan batalkan transaksi Xendit, cukup catat log error
-                \Illuminate\Support\Facades\Log::error('Gagal kirim email invoice: ' . $mailEx->getMessage());
+        // A definite client-side rejection means no transfer was accepted.
+        // Duplicate/idempotency responses and server errors remain unresolved.
+        if ($response->clientError()
+            && $response->status() !== 409
+            && $errorCode !== 'DUPLICATE_TRANSACTION_ERROR') {
+            $failed = app(WithdrawalLedgerService::class)->markFailed(
+                (int) $prepared['withdrawal_id'],
+                'Xendit: ' . $errorCode,
+                $externalId
+            );
+
+            if ($failed) {
+                try {
+                    $failed->user?->notify(new FinancialStatusNotification(
+                        $failed,
+                        'withdrawal',
+                        'rejected',
+                        'Transfer ditolak Xendit. Seluruh dana termasuk biaya admin telah dikembalikan.'
+                    ));
+                } catch (Throwable $notificationError) {
+                    Log::warning('Gagal mengirim notifikasi refund withdrawal.', [
+                        'withdrawal_id' => $prepared['withdrawal_id'],
+                        'exception' => $notificationError->getMessage(),
+                    ]);
+                }
             }
 
-            return back()->with('success', 'Transfer BERHASIL dikirim ke Xendit! Saldo sedang diproses.');
-
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Xendit Error: ' . $e->getMessage());
-            return back()->with('error', 'Gagal memproses Xendit: ' . $e->getMessage());
+            return back()->with(
+                'error',
+                'Xendit menolak transfer. Seluruh nominal penarikan termasuk biaya admin telah dikembalikan ke saldo pengguna.'
+            );
         }
+
+        Log::warning('Status disbursement Xendit memerlukan rekonsiliasi.', [
+            'withdrawal_id' => $prepared['withdrawal_id'],
+            'external_id' => $externalId,
+            'http_status' => $response->status(),
+            'error_code' => $errorCode,
+        ]);
+
+        return back()->with(
+            'error',
+            'Xendit belum memberikan hasil final. Withdrawal tetap diproses dan tidak direfund sampai status transfer dipastikan.'
+        );
     }
 
     /*
@@ -233,32 +343,32 @@ class WithdrawalController extends Controller
     public function reject(Request $request, $id)
     {
         $request->validate(['reason' => 'required|string|max:255']);
-        $wd = WithdrawalRequest::findOrFail($id);
 
-        if ($wd->status !== 'pending')
-            return back()->with('error', 'Status permintaan tidak valid.');
+        $withdrawal = app(WithdrawalLedgerService::class)->markFailed(
+            (int) $id,
+            'Ditolak Admin: ' . $request->reason,
+            null,
+            false
+        );
 
-        $wd->update([
-            'status' => 'rejected',
-            'rejection_reason' => $request->reason
-        ]);
+        if (!$withdrawal) {
+            return back()->with('error', 'Withdrawal tidak dapat ditolak karena statusnya sudah diproses atau selesai.');
+        }
 
-        $wd->user->notify(new FinancialStatusNotification($wd, 'withdrawal', 'rejected', $request->reason));
-
-        if (class_exists(Transaction::class)) {
-            Transaction::create([
-                'user_id' => $wd->user_id,
-                'type' => 'withdrawal',
-                'amount' => $wd->amount_final,
-                'currency' => 'IDR',
-                'description' => 'Penarikan dana ditolak',
-                'reference_id' => 'WD-REJECT-' . $wd->id . Str::random(4),
-                'status' => 'failed'
+        try {
+            $withdrawal->user?->notify(new FinancialStatusNotification(
+                $withdrawal,
+                'withdrawal',
+                'rejected',
+                $request->reason . ' Seluruh nominal termasuk biaya admin telah dikembalikan.'
+            ));
+        } catch (Throwable $e) {
+            Log::warning('Gagal mengirim notifikasi penolakan withdrawal.', [
+                'withdrawal_id' => $withdrawal->id,
+                'exception' => $e->getMessage(),
             ]);
         }
 
-        $wd->user->increment('wallet_balance', $wd->amount_requested);
-
-        return back()->with('success', 'Permintaan ditolak. Dana telah dikembalikan ke user.');
+        return back()->with('success', 'Withdrawal ditolak. Seluruh dana termasuk biaya admin telah dikembalikan ke saldo pengguna.');
     }
 }
