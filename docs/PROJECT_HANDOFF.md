@@ -39,8 +39,11 @@ Jangan mencatat isi `.env`, password database, password akun, PIN, token, privat
 - Pada pemeriksaan terminal 2026-11-27, `git fetch origin` menunjukkan branch lokal bergerak dari `8786709` dan `origin/fix/security-authentication` maju ke `36d668e`; `git status -sb` menunjukkan lokal **behind 1 commit**. Verifikasi SHA aktual dengan `git log -1 --oneline` sebelum sinkronisasi.
 - Sebelumnya pernah terlihat perubahan lokal belum di-commit pada `clipkeo app/lib/config.dart`. Periksa `git status --short` sebelum pull, reset, checkout, atau perubahan massal. Jangan menghapus perubahan lokal yang belum diperiksa.
 - Snapshot terminal terbaru menunjukkan tiga file lokal berubah dan belum di-commit: `clipkeo app/lib/config.dart`, `clipkeo web/app/Http/Controllers/AdminBountyController.php`, dan `clipkeo web/app/Http/Controllers/DashboardController.php`.
-- Diff `AdminBountyController.php` yang sudah dikirim pengguna menunjukkan satu perubahan: `type` dari `refund` menjadi `bounty_refund` pada pencatatan refund penolakan Admin. Ini benar menurut ENUM database, tetapi masih lokal; file remote pada branch acuan yang dibaca masih memakai `refund`.
-- Diff `config.dart` dan `DashboardController.php` belum diperiksa. Jangan pull/merge/rebase/reset/restore sebelum ketiga diff tersebut ditinjau dan diamankan. Setelah aman, sinkronkan commit dokumentasi remote tanpa menimpa perubahan lokal.
+- Ketiga diff lokal sudah diperiksa:
+  - `clipkeo app/lib/config.dart`: IP LAN berubah dari `192.168.1.102` menjadi `192.168.18.3`. Ini konfigurasi mesin/jaringan lokal; jangan commit sebagai konfigurasi universal. Rekomendasikan `--dart-define` atau environment build untuk dev/staging/production.
+  - `AdminBountyController.php`: tipe transaksi refund penolakan Admin berubah dari `refund` menjadi `bounty_refund`, sesuai ENUM database. Perubahan masih lokal; file remote pada branch acuan masih memakai `refund`.
+  - `DashboardController.php`: perhitungan `$lockedFunds` berubah dari status `active, completed` menjadi `pending_review, active`. Ini lebih tepat untuk dana campaign yang masih di-hold, tetapi perlu menuntaskan semantik refund/remaining_budget.
+- Jangan pull/merge/rebase/reset/restore sebelum ketiga diff diamankan. Setelah aman, sinkronkan commit dokumentasi remote tanpa menimpa perubahan lokal.
 
 Perintah awal setiap sesi kerja:
 
@@ -232,3 +235,36 @@ Setiap kali ada revisi repository atau hasil pengujian baru:
 - Commit dokumentasi handoff sebelumnya: `36d668e84a32b77adaf129e1d4dfa58150d39175`.
 - Perubahan working tree lokal terbaru dari pengguna: tiga file modified; hanya diff `AdminBountyController.php` yang sudah ditinjau. `config.dart` dan `DashboardController.php` masih menunggu pemeriksaan.
 - Roadmap dibuat berdasarkan pembacaan kode branch `fix/security-authentication` pada commit `36d668e`; temuan dan rekomendasi harus diverifikasi ulang terhadap kode lokal terbaru sebelum implementasi.
+
+
+## 12. Review diff lokal terbaru — 2026-11-27
+
+### A. Konfigurasi Flutter
+Diff lokal pada `clipkeo app/lib/config.dart` hanya mengubah IP LAN dari `192.168.1.102` ke `192.168.18.3`. Ini boleh dipakai untuk menjalankan aplikasi pada jaringan laptop saat ini, tetapi jangan dijadikan konfigurasi bersama untuk seluruh pengguna. Rencana perbaikan jangka panjang: pisahkan base URL dev/staging/production menggunakan `--dart-define` atau build flavor, dan pastikan URL production memakai HTTPS/domain publik.
+
+### B. Dashboard escrow
+Diff lokal pada `DashboardController.php` mengubah filter dana tertahan dari `['active', 'completed']` menjadi `['pending_review', 'active']`.
+
+Pembacaan kode branch:
+- `BountyController::store` memotong saldo Publisher, membuat campaign berstatus `pending_review`, mengisi `remaining_budget`, dan mencatat `bounty_hold`.
+- `AdminBountyController::approve` mengubah `pending_review` menjadi `active`.
+- `AdminBountyController::reject` mengembalikan `remaining_budget` ke Publisher dan mengubah status menjadi `rejected`, tetapi belum mengosongkan kolom `remaining_budget`.
+- `BountyController::destroy` mengembalikan sisa budget dan mengubah status menjadi `completed`, tetapi belum mengosongkan kolom `remaining_budget`. Dengan demikian status `completed` juga dipakai untuk pembatalan/refund, bukan hanya campaign yang anggarannya habis.
+- Alur pembayaran menandai campaign `completed` saat sisa budget <= 100.
+
+Kesimpulan: filter baru `pending_review, active` lebih tepat untuk dashboard escrow yang masih tertahan dan menghindari menghitung ulang campaign completed yang mungkin sudah direfund. Namun, perbaikan permanen perlu menyetel `remaining_budget = 0` saat dana direfund dan mempertimbangkan status khusus `cancelled` agar status selesai karena budget habis tidak tercampur dengan pembatalan. Definisikan juga apakah sisa <= Rp100 dianggap dust/residual atau harus direfund.
+
+### C. Tipe transaksi refund/reward
+Perubahan lokal `bounty_refund` di AdminBountyController benar menurut ENUM. Audit branch yang dibaca masih menemukan pemakaian lama:
+- `BountyController::destroy`: `refund` (perlu `bounty_refund`).
+- `SubmissionController`: `reward` dan `payout`.
+- `AdminBountyController::takeoverApprove`: `reward` dan `payout`.
+- `AdminBountyController::reject` pada remote branch masih `refund`; perubahan lokal pengguna sudah mengubahnya menjadi `bounty_refund`.
+
+Jangan lakukan replace massal. Standarkan berdasarkan ENUM dan makna transaksi, lalu uji arah pemasukan/pengeluaran untuk Clipper dan Publisher, reference ID, dan konsistensi wallet/ledger. Untuk hadiah, gunakan pemetaan yang disetujui setelah memeriksa transaksi di kedua sisi; jangan sekadar mengganti string tanpa menguji dampak laporan.
+
+### D. Sinkronisasi Git
+- Pada terminal pengguna, branch lokal terakhir terlihat di `8786709`, sedangkan remote sudah mencapai `36d668e` sebelum dua commit dokumentasi roadmap/handoff ditambahkan.
+- Remote branch kini memiliki tiga commit dokumentasi setelah `8786709`: `36d668e`, `d0deb43`, dan `98a92cd`. Tidak ada perubahan kode aplikasi pada ketiga commit tersebut.
+- Sebelum pull, simpan patch dan stash hanya tiga file lokal. Lakukan fast-forward, lalu pop stash dan pastikan ketiga perubahan kembali. Jangan commit perubahan IP lokal.
+- Hasil test lokal setelah perubahan ini belum dilaporkan; jangan klaim terverifikasi.
