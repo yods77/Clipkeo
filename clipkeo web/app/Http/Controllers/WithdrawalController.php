@@ -340,7 +340,6 @@ class WithdrawalController extends Controller
                     'Xendit mengembalikan status transfer yang belum dikenali. Withdrawal ditahan untuk pemeriksaan.'
                 );
             }
-        }
 
         try {
             // X-IDEMPOTENCY-KEY and external_id remain stable across retries.
