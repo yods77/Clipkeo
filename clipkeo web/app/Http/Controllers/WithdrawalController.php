@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\WithdrawalInvoiceMail;
 use App\Models\WithdrawalRequest;
-use App\Models\Transaction;
 use App\Models\PayoutMethod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -130,7 +129,7 @@ class WithdrawalController extends Controller
     |--------------------------------------------------------------------------
     | 3. ADMIN APPROVE & TRANSFER VIA XENDIT
     |--------------------------------------------------------------------------
-    | TIDAK DIUBAH (Sama persis seperti kode Anda)
+    | Approval diproteksi dengan lock database dan idempotency key Xendit.
     */
     public function approve($id)
     {
@@ -299,20 +298,27 @@ class WithdrawalController extends Controller
                 $externalId
             );
 
-            if ($failed) {
-                try {
-                    $failed->user?->notify(new FinancialStatusNotification(
-                        $failed,
-                        'withdrawal',
-                        'rejected',
-                        'Transfer ditolak Xendit. Seluruh dana termasuk biaya admin telah dikembalikan.'
-                    ));
-                } catch (Throwable $notificationError) {
-                    Log::warning('Gagal mengirim notifikasi refund withdrawal.', [
-                        'withdrawal_id' => $prepared['withdrawal_id'],
-                        'exception' => $notificationError->getMessage(),
-                    ]);
+            if (!$failed) {
+                $current = WithdrawalRequest::find($prepared['withdrawal_id']);
+                if ($current?->status === 'completed') {
+                    return back()->with('success', 'Withdrawal sudah dikonfirmasi berhasil oleh Xendit.');
                 }
+
+                return back()->with('error', 'Status withdrawal berubah saat diproses. Periksa riwayat transaksi sebelum mencoba lagi.');
+            }
+
+            try {
+                $failed->user?->notify(new FinancialStatusNotification(
+                    $failed,
+                    'withdrawal',
+                    'rejected',
+                    'Transfer ditolak Xendit. Seluruh dana termasuk biaya admin telah dikembalikan.'
+                ));
+            } catch (Throwable $notificationError) {
+                Log::warning('Gagal mengirim notifikasi refund withdrawal.', [
+                    'withdrawal_id' => $prepared['withdrawal_id'],
+                    'exception' => $notificationError->getMessage(),
+                ]);
             }
 
             return back()->with(
@@ -338,7 +344,7 @@ class WithdrawalController extends Controller
     |--------------------------------------------------------------------------
     | 4. ADMIN REJECT (TOLAK PENARIKAN)
     |--------------------------------------------------------------------------
-    | TIDAK DIUBAH (Sama persis seperti kode Anda)
+    | Penolakan hanya diizinkan sebelum transfer dikirim ke Xendit.
     */
     public function reject(Request $request, $id)
     {
