@@ -199,6 +199,12 @@ class WebhookController extends Controller
                     'external_id' => $externalId,
                     'failure_code' => $failureCode,
                 ]);
+            } elseif ($withdrawalRecord->status === 'completed') {
+                Log::critical('Xendit melaporkan withdrawal FAILED setelah ledger lokal COMPLETED.', [
+                    'withdrawal_id' => $withdrawalId,
+                    'external_id' => $externalId,
+                    'provider_id' => $providerId,
+                ]);
             }
         }
 
