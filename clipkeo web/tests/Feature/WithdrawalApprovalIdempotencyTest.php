@@ -101,7 +101,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
 
         Http::assertSentCount(2);
         Http::assertSent(function ($request) use ($withdrawal) {
-            return $request->hasHeader('X-IDEMPOTENCY-KEY', 'WD-' . $withdrawal->id);
+            return $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id);
         });
     }
 
