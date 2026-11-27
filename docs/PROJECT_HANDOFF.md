@@ -277,3 +277,60 @@ Jangan lakukan replace massal. Standarkan berdasarkan ENUM dan makna transaksi, 
 - `git stash pop` berhasil tanpa konflik. Ketiga file kembali modified di working tree dan stash `d01feb9dfddabe2633fa6c3c4e05907e4a6ab7ba` dihapus otomatis setelah penerapan berhasil.
 - Status terakhir berdasarkan output terminal pengguna: branch up to date dengan origin; tiga file lokal modified. Belum ada hasil pemeriksaan ulang `git diff --stat` dan nilai isi file setelah pemulihan. Minta pengguna menjalankan verifikasi sebelum mengubah kode berikutnya.
 - Jangan commit IP LAN di `config.dart` sebagai konfigurasi universal. Audit dan pisahkan konfigurasi environment pada pekerjaan berikutnya.
+
+
+## 13. Pembaruan 2026-11-27 — Financial Integrity & Security Hardening
+
+### Status Git dan branch
+- Seluruh implementasi lanjutan dikerjakan hanya pada branch `fix/security-authentication`. Tidak ada commit atau merge ke `main`.
+- Setelah implementasi, `fix/security-authentication` berada 65 commit di depan dan 0 commit di belakang `main`.
+- Posisi lokal terakhir yang diketahui dari terminal pengguna adalah `de6b9c1`. Remote kini 28 commit di depan posisi tersebut. Daftar file pada 28 commit baru tidak mencakup tiga file lokal yang sebelumnya modified: `clipkeo app/lib/config.dart`, `AdminBountyController.php`, dan `DashboardController.php`.
+- Branch `fix/security-cloudinary-config` tetap terpisah, 1 commit di depan `main`. Diff-nya menghapus endpoint diagnostik publik `/cek-config` dan `/cek-koneksi-cloud`. Branch itu tidak di-merge; penghapusan `/cek-config` dipindahkan secara manual ke branch pengembangan utama, sementara `/cek-koneksi-cloud` memang sudah tidak ada di branch tersebut.
+- Commit kode terakhir sebelum pembaruan dokumen ini: `9b9c172ae1e33245996a5b9c0a036424df50022a`.
+
+### Implementasi yang sudah di-commit
+1. **Ledger transaksi**
+   - Menambahkan konstanta tipe transaksi sesuai ENUM: `deposit`, `withdrawal`, `bounty_hold`, `bounty_prize`, `bounty_refund`, dan `platform_fee`.
+   - Menambahkan compatibility mapping: `reward` dan `payout` menjadi `bounty_prize`; `refund` menjadi `bounty_refund`.
+   - `SubmissionController` kini mencatat kedua sisi pembayaran hadiah sebagai `bounty_prize`.
+   - Filter dan tampilan wallet web, tampilan wallet Flutter, statistik publik, dan grafik Admin membedakan pemasukan/pengeluaran berdasarkan role pemilik transaksi.
+2. **Refund campaign**
+   - `BountyController::destroy` memakai transaksi database dan row lock pada campaign serta Publisher.
+   - Refund menggunakan `bounty_refund`; `remaining_budget` diset ke 0 setelah refund agar tidak dapat dihitung atau dikembalikan dua kali.
+   - Kebijakan residual <= Rp100 dan penggunaan status `completed` untuk pembatalan belum diubah.
+3. **Withdrawal**
+   - API withdrawal sekarang mewajibkan PIN 6 digit dan memverifikasinya di server; endpoint PIN dan withdrawal diberi throttle.
+   - Flutter mengirim PIN bersama request withdrawal.
+   - Saldo dan payout method dikunci ulang di dalam transaksi API.
+   - Withdrawal web memvalidasi kepemilikan payout method dan memproses pembuatan request serta debit saldo dalam satu transaksi; notifikasi dikirim setelah commit.
+   - Webhook withdrawal memakai row lock dan hanya menerima transisi dari status pending/processing. Callback gagal duplikat atau callback gagal yang datang setelah sukses tidak mengembalikan saldo lagi.
+4. **Route security**
+   - Menghapus endpoint diagnostik publik `/cek-config`.
+   - Menghapus deklarasi duplikat route approve/reject withdrawal yang berada di luar group admin.
+5. **Test yang ditambahkan/diubah**
+   - `TransactionTypeNormalizationTest`
+   - `WalletWithdrawalPinTest`
+   - `WithdrawalOwnershipTest`
+   - `WithdrawalWebhookIdempotencyTest`
+   - `AdminWithdrawalAuthorizationTest`
+   - `AuthenticationSecurityTest` diperluas untuk memastikan endpoint diagnostik tidak terbuka.
+
+### Status verifikasi
+- Test otomatis telah ditambahkan, tetapi **belum dijalankan** pada lingkungan Laravel project.
+- Pemeriksaan GitHub untuk commit terakhir melaporkan tidak ada status checks dan tidak ada workflow run terkait. Karena itu, jangan menyebut perubahan ini sudah lulus test atau terverifikasi end-to-end.
+- Setelah branch disinkronkan di komputer pengguna, jalankan `php artisan test`, `php artisan test --filter=TransactionTypeNormalizationTest`, `php artisan test --filter=WalletWithdrawalPinTest`, `php artisan test --filter=WithdrawalOwnershipTest`, `php artisan test --filter=WithdrawalWebhookIdempotencyTest`, `php artisan test --filter=AdminWithdrawalAuthorizationTest`, serta `flutter analyze`.
+
+### Risiko P0 yang masih terbuka
+- `WithdrawalController::approve` masih perlu idempotency untuk mencegah dua admin memicu transfer Xendit ganda. Status request belum dikunci dan external reference belum stabil per withdrawal.
+- Siklus ledger withdrawal web dan API belum sepenuhnya seragam. API membuat transaksi pending saat pengajuan, sedangkan web tidak; proses approve dapat menambahkan catatan transaksi lain. Tetapkan satu lifecycle dan satu referensi ledger sebelum rilis.
+- Kebijakan refund saat transfer gagal perlu dipastikan: webhook saat ini mengembalikan nilai dari transaksi yang direferensikan; pastikan apakah fee 10% juga harus dikembalikan.
+- `AdminBountyController` belum diubah karena file tersebut memiliki diff lokal pengguna. Compatibility mapping di model melindungi write lama untuk sementara; setelah perubahan lokal disinkronkan, refactor call site ke konstanta canonical dan uji kedua sisi ledger.
+- Status `completed` masih mencampur campaign yang anggarannya habis dan campaign yang dibatalkan/refund. Pertimbangkan status `cancelled` melalui migration terencana, bukan perubahan enum mendadak.
+- Perubahan lokal `DashboardController.php` untuk escrow `pending_review` dan `active` belum masuk remote. Jangan menimpa diff lokal tersebut.
+
+### Langkah berikutnya
+1. Di komputer pengguna, verifikasi `git status -sb` dan backup tiga diff lokal. Remote 28 commit di depan HEAD lokal terakhir yang diketahui; fast-forward hanya setelah status/diff diperiksa.
+2. Setelah sinkronisasi, periksa kembali tiga diff lokal dan pertahankan perubahan yang dimaksud.
+3. Jalankan seluruh test Laravel dan `flutter analyze`; perbaiki setiap kegagalan sebelum fitur baru.
+4. Lanjutkan idempotency approval Xendit dan satukan lifecycle ledger withdrawal.
+5. Setelah itu, audit ulang dashboard escrow, refund Admin, dan konsistensi saldo/ledger dengan data staging.
