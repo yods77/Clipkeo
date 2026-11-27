@@ -135,7 +135,7 @@ class WithdrawalController extends Controller
     {
         $secretKey = (string) config('services.xendit.secret_key');
         if ($secretKey === '') {
-            return back()->with('error', 'Xendit belum dikonfigurasi. Withdrawal tetap menunggu dan saldo tidak berubah.');
+            return back()->with('error', 'Xendit belum dikonfigurasi. Withdrawal tetap menunggu; saldo penarikan yang sudah ditahan tidak dipotong atau dikembalikan lagi.');
         }
 
         $prepared = DB::transaction(function () use ($id) {
