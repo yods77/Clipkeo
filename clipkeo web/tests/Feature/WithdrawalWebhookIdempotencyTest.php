@@ -28,7 +28,7 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
         $this->sendWebhook($externalId, 'FAILED')
             ->assertOk();
 
-        $this->assertSame(100000.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame(50000.0, (float) $user->fresh()->wallet_balance);
         $this->assertSame('failed', $transaction->fresh()->status);
         $this->assertSame('rejected', $withdrawal->fresh()->status);
         $this->assertSame('failed', Transaction::where('reference_id', 'FEE-WD-' . $withdrawal->id)->value('status'));
@@ -45,7 +45,7 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
         $this->sendWebhook($externalId, 'COMPLETED')
             ->assertOk();
 
-        $this->assertSame(100000.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame(50000.0, (float) $user->fresh()->wallet_balance);
         $this->assertSame('failed', $transaction->fresh()->status);
         $this->assertSame('rejected', $withdrawal->fresh()->status);
     }
@@ -60,6 +60,10 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
         $this->assertSame(0.0, (float) $user->fresh()->wallet_balance);
         $this->assertSame('success', $transaction->fresh()->status);
         $this->assertSame('completed', $withdrawal->fresh()->status);
+        $this->assertSame('success', Transaction::where('reference_id', 'FEE-WD-' . $withdrawal->id)->value('status'));
+        $this->assertDatabaseMissing('transactions', [
+            'reference_id' => 'WRF-WD-' . $withdrawal->id,
+        ]);
 
         $this->sendWebhook($externalId, 'FAILED')
             ->assertOk();
@@ -72,7 +76,7 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
     private function createPendingWithdrawal(): array
     {
         $user = User::factory()->create([
-            'wallet_balance' => 50000,
+            'wallet_balance' => 0,
         ]);
 
         $payoutMethod = $user->payoutMethods()->create([
