@@ -327,12 +327,10 @@ class WalletService {
       final message = responseData['message']?.toString() ??
           'Server belum dapat memproses permintaan penarikan.';
 
-      // These responses are produced before a withdrawal is committed.
-      // A new user attempt may therefore use a new key.
-      if (response.statusCode >= 400 &&
-          response.statusCode < 500 &&
-          response.statusCode != 409 &&
-          response.statusCode != 429) {
+      // A 400 is returned by the controller only after it has checked for
+      // an existing idempotency record. It therefore represents a definitive
+      // rejection before a new withdrawal was committed.
+      if (response.statusCode == 400) {
         await _clearPendingWithdrawalAttempt(pendingStorageKey);
 
         return WithdrawalRequestResult(
@@ -341,8 +339,10 @@ class WalletService {
         );
       }
 
-      // 409 means the key/payload needs reconciliation. 429 and 5xx are
-      // retryable/ambiguous, so preserve the same key and payload.
+      // Preserve the key for 401/422 as well: PIN or validation checks run
+      // before the server looks up an earlier committed request. Clearing it
+      // here could turn a retry into a second debit. 409, 429 and 5xx also
+      // require the original key to remain available.
       return WithdrawalRequestResult(
         status: response.statusCode == 409
             ? WithdrawalRequestStatus.pendingRequestMismatch
