@@ -113,7 +113,7 @@ class WebhookController extends Controller
                     $withdrawal->user?->notify(
                         new FinancialStatusNotification($withdrawal, 'withdrawal', 'success')
                     );
-                } catch (\\Throwable $e) {
+                } catch (\Throwable $e) {
                     Log::warning('Gagal mengirim notifikasi withdrawal berhasil.', [
                         'withdrawal_id' => $withdrawalId,
                         'exception' => $e->getMessage(),
@@ -142,7 +142,7 @@ class WebhookController extends Controller
                         'rejected',
                         'Transfer gagal (' . $failureCode . '). Seluruh nominal termasuk biaya admin telah dikembalikan.'
                     ));
-                } catch (\\Throwable $e) {
+                } catch (\Throwable $e) {
                     Log::warning('Gagal mengirim notifikasi refund withdrawal.', [
                         'withdrawal_id' => $withdrawalId,
                         'exception' => $e->getMessage(),
