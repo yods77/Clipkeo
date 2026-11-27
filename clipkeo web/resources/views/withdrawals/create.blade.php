@@ -142,7 +142,7 @@
                         pin: '',
                     
                         // Getter Helper
-                        get fee() { return parseInt(this.amount || 0) * this.fee_percent; },
+                        get fee() { return Math.round(parseInt(this.amount || 0) * this.fee_percent); },
                         get final() { return parseInt(this.amount || 0) - this.fee; },
                         get isOverBudget() { return parseInt(this.amount || 0) > parseInt(this.balance); },
                         get isValid() { return parseInt(this.amount || 0) >= 50000 && !this.isOverBudget; },
@@ -316,7 +316,7 @@
                             </div>
 
                             {{-- Input: Padding-left ditambah ke pl-20 (80px) atau pl-24 (96px) --}}
-                            <input type="number" name="amount" x-model="amount" required min="50000"
+                            <input type="number" name="amount" x-model="amount" required min="50000" step="1"
                                 class="input-neumorph-inset w-full pl-20 pr-6 py-5 text-gray-800 font-black text-3xl tracking-tighter outline-none transition-all duration-300 placeholder-gray-300"
                                 :class="{
                                     'text-rose-500 shadow-[inset_6px_6px_10px_#fecaca,inset_-6px_-6px_10px_#ffffff]': isOverBudget,
