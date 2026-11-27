@@ -33,9 +33,20 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
     {
         [$admin, $withdrawal, $transaction, $fee] = $this->createWithdrawal();
 
-        Http::fake(function ($request) use ($withdrawal) {
+        $lookupAttempts = 0;
+        Http::fake(function ($request) use ($withdrawal, &$lookupAttempts) {
             if ($request->method() === 'GET') {
-                return Http::response([], 200);
+                $lookupAttempts++;
+
+                if ($lookupAttempts === 1) {
+                    return Http::response([], 200);
+                }
+
+                return Http::response([[
+                    'id' => 'xendit-disbursement-123',
+                    'external_id' => 'WD-testing-' . $withdrawal->id,
+                    'status' => 'PENDING',
+                ]], 200);
             }
 
             return Http::response([
@@ -181,6 +192,56 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
 
         $this->assertSame(50000.0, (float) $withdrawal->user->fresh()->wallet_balance);
         $this->assertDatabaseCount('transactions', 3);
+    }
+
+    public function test_processing_legacy_withdrawal_uses_its_original_external_id_for_status_check(): void
+    {
+        [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
+        $legacyExternalId = 'WD-20261127-' . $withdrawal->id;
+
+        $withdrawal->update(['status' => 'processing']);
+        $transaction->update(['reference_id' => $legacyExternalId]);
+
+        Http::fake(function ($request) use ($legacyExternalId) {
+            if ($request->method() === 'GET') {
+                return Http::response([[
+                    'id' => 'legacy-xendit-disbursement',
+                    'external_id' => $legacyExternalId,
+                    'status' => 'PENDING',
+                ]], 200);
+            }
+
+            throw new \\RuntimeException('A legacy payout must never be submitted again.');
+        });
+
+        $this->actingAs($admin)
+            ->post(route('admin.withdrawals.approve', $withdrawal->id))
+            ->assertRedirect();
+
+        $this->assertSame($legacyExternalId, $transaction->fresh()->reference_id);
+        $this->assertSame('legacy-xendit-disbursement', $transaction->fresh()->external_ref);
+        Http::assertSentCount(1);
+        Http::assertSent(function ($request) use ($legacyExternalId) {
+            return $request->method() === 'GET'
+                && $request['external_id'] === $legacyExternalId;
+        });
+    }
+
+    public function test_processing_legacy_withdrawal_without_ledger_is_held_for_manual_reconciliation(): void
+    {
+        [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
+        $withdrawal->update(['status' => 'processing']);
+        $transaction->delete();
+
+        Http::fake();
+
+        $this->actingAs($admin)
+            ->post(route('admin.withdrawals.approve', $withdrawal->id))
+            ->assertRedirect()
+            ->assertSessionHas('error');
+
+        $this->assertSame('processing', $withdrawal->fresh()->status);
+        Http::assertNothingSent();
     }
 
     private function createWithdrawal(): array
