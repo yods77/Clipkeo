@@ -73,6 +73,24 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
         $this->assertSame('completed', $withdrawal->fresh()->status);
     }
 
+    public function test_legacy_timestamp_external_id_still_refunds_the_full_amount(): void
+    {
+        [$user, $withdrawal] = $this->createPendingWithdrawal();
+        $legacyExternalId = 'WD-20261127-' . $withdrawal->id;
+
+        $this->sendWebhook($legacyExternalId, 'FAILED')
+            ->assertOk();
+
+        $this->assertSame(50000.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame('rejected', $withdrawal->fresh()->status);
+        $this->assertDatabaseHas('transactions', [
+            'reference_id' => 'WRF-WD-' . $withdrawal->id,
+            'type' => Transaction::TYPE_WITHDRAWAL_REFUND,
+            'amount' => 50000,
+            'status' => 'success',
+        ]);
+    }
+
     private function createPendingWithdrawal(): array
     {
         $user = User::factory()->create([
