@@ -36,8 +36,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/wallet/check-pin', [WalletController::class, 'cekPin']);
     Route::post('/wallet/setup-pin', [WalletController::class, 'setupPin']);
-    Route::post('/wallet/withdraw', [WalletController::class, 'withdraw']);
-    Route::post('/wallet/validate-pin', [ProfileController::class, 'validatePin']);
+    Route::post('/wallet/withdraw', [WalletController::class, 'withdraw'])->middleware('throttle:5,1');
+    Route::post('/wallet/validate-pin', [ProfileController::class, 'validatePin'])->middleware('throttle:5,1');
     Route::get('/dashboard', [DashboardController::class, 'index']);
     Route::get('/user', [ProfileController::class, 'index']);
     Route::post('/profile/update', [ProfileController::class, 'update']);
