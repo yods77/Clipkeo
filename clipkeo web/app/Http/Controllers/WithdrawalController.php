@@ -47,7 +47,15 @@ class WithdrawalController extends Controller
         ]);
 
         $user = auth()->user();
-        $method = \App\Models\PayoutMethod::find($request->payout_method_id);
+        $method = \App\Models\PayoutMethod::whereKey($request->payout_method_id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (!$method) {
+            return back()->withErrors([
+                'payout_method_id' => 'Metode pembayaran tidak valid atau bukan milik Anda.',
+            ]);
+        }
 
         // B. Cek Kecukupan Saldo
         if ($user->wallet_balance < $request->amount) {
