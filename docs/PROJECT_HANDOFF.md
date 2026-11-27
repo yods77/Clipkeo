@@ -334,3 +334,58 @@ Jangan lakukan replace massal. Standarkan berdasarkan ENUM dan makna transaksi, 
 3. Jalankan seluruh test Laravel dan `flutter analyze`; perbaiki setiap kegagalan sebelum fitur baru.
 4. Lanjutkan idempotency approval Xendit dan satukan lifecycle ledger withdrawal.
 5. Setelah itu, audit ulang dashboard escrow, refund Admin, dan konsistensi saldo/ledger dengan data staging.
+
+
+## 14. Pembaruan 2026-11-27 — API Withdrawal Idempotency dan Mobile Retry
+
+### Posisi branch
+- Pekerjaan dilanjutkan pada `fix/security-authentication`; tidak ada perubahan atau merge ke `main`.
+- HEAD saat catatan ini dibuat: `9761aa563e422a0e9863577eaa67a3e4e1ccc379`.
+- Branch dibandingkan dengan `main`: 174 commit ahead, 0 behind.
+
+### Verifikasi lokal yang dilaporkan pengguna sebelum perubahan idempotency API
+- `php artisan test`: 64 tests passed, 249 assertions.
+- `WithdrawalApprovalIdempotencyTest`: 7 tests passed.
+- `WithdrawalWebhookIdempotencyTest`: 4 tests passed.
+- `WithdrawalOwnershipTest`: 2 tests passed.
+- `WalletWithdrawalPinTest`: 1 test passed.
+- Flutter `pub get`: berhasil; 105 paket memiliki versi lebih baru yang tidak cocok dengan constraint saat ini.
+- Flutter `analyze`: 227 temuan kategori info; tidak ada error analyzer yang terlihat pada output yang dibagikan.
+- Flutter `test` saat itu belum dapat dijalankan karena direktori `test` belum tersedia.
+- APK debug belum dilaporkan berhasil dibangun.
+
+### Implementasi baru di branch — BELUM diverifikasi di komputer pengguna
+1. **API idempotency**
+   - Migration baru: `2026_11_27_000002_add_idempotency_key_to_withdrawal_requests.php`.
+   - API `POST /wallet/withdraw` sekarang mewajibkan header UUID `Idempotency-Key`.
+   - Kunci unik per user pada `withdrawal_requests`; legacy/web requests tetap dapat menyimpan NULL.
+   - Retry dengan key dan payload sama mengembalikan withdrawal lama tanpa debit atau notifikasi kedua.
+   - Key sama dengan nominal/rekening berbeda menghasilkan HTTP 409.
+   - Pencarian withdrawal lama dilakukan sebelum pemeriksaan saldo, sehingga replay tetap bisa dipulihkan setelah debit pertama mengurangi saldo.
+   - Response mengembalikan `withdrawal_status` aktual, termasuk untuk replay.
+
+2. **Flutter retry safety**
+   - `WalletService` membuat UUID v4 dan menyimpan key serta payload sebelum request dikirim.
+   - Data pending dipisahkan berdasarkan `user_id`, sehingga tidak bercampur antar akun dan tetap dikenali setelah token diperbarui.
+   - `AuthService.logout` mempertahankan catatan idempotency yang belum terselesaikan; PIN dan bearer token tidak disimpan di catatan tersebut.
+   - Timeout, 401/422, 409, 429, dan 5xx mempertahankan key untuk rekonsiliasi. Respons 400 yang definitif dan respons 200 membersihkan key.
+   - Layar withdrawal memulihkan nominal/rekening yang tertunda, mengunci perubahan payload sampai status diperiksa, dan mengizinkan retry walau saldo saat ini sudah berkurang.
+   - Layar hasil menampilkan status withdrawal dari server, bukan mengasumsikan semua response adalah pending.
+
+3. **Test baru**
+   - Backend: `WalletWithdrawalIdempotencyTest` berisi 4 skenario: replay tidak mendebit dua kali, payload berbeda ditolak, key wajib, dan key yang sama tetap terisolasi per user.
+   - `WalletWithdrawalPinTest` diperbarui untuk mengirim header idempotency.
+   - Flutter: `test/services/wallet_service_test.dart` mencakup retry setelah timeout, token renewal, payload mismatch, PIN salah, dan penolakan saldo yang definitif.
+
+### Risiko dan kompatibilitas
+- API baru mewajibkan `Idempotency-Key`; versi aplikasi lama yang belum mengirim header akan menerima HTTP 422. Deploy backend dan rilis Flutter harus dikoordinasikan.
+- Catatan pending disimpan di SharedPreferences. Uninstall aplikasi atau penghapusan data aplikasi dapat menghilangkan kunci lokal; lakukan uji staging dan pertimbangkan rekonsiliasi server-side tambahan sebelum produksi.
+- Implementasi dan test baru di atas belum boleh disebut lulus sampai pengguna menjalankan test di komputer lokal.
+
+### Langkah berikutnya
+1. Sinkronkan branch secara fast-forward; jangan apply/pop stash lokal lama.
+2. Jalankan `php artisan test --filter=WalletWithdrawalIdempotencyTest`, `php artisan test --filter=WalletWithdrawalPinTest`, lalu seluruh `php artisan test`.
+3. Di folder Flutter jalankan `flutter pub get`, `dart format lib/services/wallet_service.dart lib/screens/withdraw_input_screen.dart lib/screens/withdraw_success_screen.dart lib/auth_service.dart test/services/wallet_service_test.dart`, `flutter analyze`, `flutter test`, dan `flutter build apk --debug`.
+4. Setelah test lolos, uji di staging: request sukses, timeout setelah commit, retry dengan key sama, token renewal/logout-login, PIN salah lalu benar, key berbeda payload, saldo rendah, dan status Xendit pending/completed/failed.
+5. Backup database sebelum menjalankan migration pada environment staging/production. Jangan gunakan `migrate:fresh`.
+6. Pertahankan branch `fix/security-authentication`; jangan merge ke `main` tanpa persetujuan.
