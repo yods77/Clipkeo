@@ -195,14 +195,14 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 
   // -- LOGIC PERHITUNGAN --
   double get rawAmount => double.tryParse(inputAmount) ?? 0;
-  double get fee => rawAmount * 0.10;
+  double get fee => (rawAmount * 0.10).roundToDouble();
   double get finalAmount => rawAmount - fee;
 
   // -- INPUT KEYPAD --
   void onKeyTap(String value) {
     setState(() {
-      if (inputAmount == "0" && value != ".")
-        inputAmount = value;
+      if (inputAmount == "0")
+        inputAmount = value == "00" ? "0" : value;
       else if (inputAmount.length < 10)
         inputAmount += value;
     });
@@ -621,7 +621,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _keyBtn(".", isText: true),
+                _keyBtn("00", isText: true),
                 _keyBtn("0", isText: true),
                 GestureDetector(
                   onTap: onBackspace,
