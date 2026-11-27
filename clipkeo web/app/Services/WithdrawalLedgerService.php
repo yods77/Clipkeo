@@ -65,9 +65,7 @@ class WithdrawalLedgerService
                 ->lockForUpdate()
                 ->first();
 
-            if (!$withdrawal
-                || in_array($withdrawal->status, ['completed', 'rejected'], true)
-                || (!$allowProcessing && $withdrawal->status !== 'pending')) {
+            if (!$withdrawal || in_array($withdrawal->status, ['completed', 'rejected'], true)) {
                 return null;
             }
 
@@ -121,7 +119,9 @@ class WithdrawalLedgerService
                 ->lockForUpdate()
                 ->first();
 
-            if (!$withdrawal || in_array($withdrawal->status, ['completed', 'rejected'], true)) {
+            if (!$withdrawal
+                || in_array($withdrawal->status, ['completed', 'rejected'], true)
+                || (!$allowProcessing && $withdrawal->status !== 'pending')) {
                 return null;
             }
 
