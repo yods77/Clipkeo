@@ -419,6 +419,7 @@ class _WalletScreenState extends State<WalletScreen> {
         final bool isIncome = transactionType == 'deposit' ||
             transactionType == 'bounty_refund' ||
             transactionType == 'refund' ||
+            transactionType == 'withdrawal_refund' ||
             transactionType == 'reward' ||
             (transactionType == 'bounty_prize' && userRole == 'clipper');
         final bool isWithdraw = !isIncome;
