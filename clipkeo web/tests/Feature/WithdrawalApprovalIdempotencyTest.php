@@ -33,13 +33,17 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
     {
         [$admin, $withdrawal, $transaction, $fee] = $this->createWithdrawal();
 
-        Http::fake([
-            'https://api.xendit.co/disbursements' => Http::response([
+        Http::fake(function ($request) use ($withdrawal) {
+            if ($request->method() === 'GET') {
+                return Http::response([], 200);
+            }
+
+            return Http::response([
                 'id' => 'xendit-disbursement-123',
                 'external_id' => 'WD-testing-' . $withdrawal->id,
                 'status' => 'PENDING',
-            ], 200),
-        ]);
+            ], 200);
+        });
 
         $this->actingAs($admin)
             ->post(route('admin.withdrawals.approve', $withdrawal->id))
@@ -49,9 +53,10 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
         $this->assertSame('xendit-disbursement-123', $transaction->fresh()->external_ref);
         $this->assertSame('pending', $fee->fresh()->status);
 
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
         Http::assertSent(function ($request) use ($withdrawal) {
-            return $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id)
+            return $request->method() === 'POST'
+                && $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id)
                 && $request['external_id'] === 'WD-testing-' . $withdrawal->id;
         });
 
@@ -61,17 +66,24 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
             ->post(route('admin.withdrawals.approve', $withdrawal->id))
             ->assertRedirect();
 
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
     }
 
     public function test_admin_reconciles_an_ambiguous_timeout_before_any_second_transfer(): void
     {
         [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
         $postAttempts = 0;
+        $lookupAttempts = 0;
         $externalId = 'WD-testing-' . $withdrawal->id;
 
-        Http::fake(function ($request) use (&$postAttempts, $externalId) {
+        Http::fake(function ($request) use (&$postAttempts, &$lookupAttempts, $externalId) {
             if ($request->method() === 'GET') {
+                $lookupAttempts++;
+
+                if ($lookupAttempts === 1) {
+                    return Http::response([], 200);
+                }
+
                 return Http::response([[
                     'id' => 'xendit-disbursement-after-timeout',
                     'external_id' => $externalId,
@@ -99,8 +111,9 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
             $transaction->fresh()->external_ref
         );
 
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
         $this->assertSame(1, $postAttempts);
+        $this->assertSame(2, $lookupAttempts);
         Http::assertSent(function ($request) use ($withdrawal) {
             return $request->method() === 'POST'
                 && $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id);
@@ -111,12 +124,16 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
     {
         [$admin, $withdrawal, $transaction, $fee] = $this->createWithdrawal();
 
-        Http::fake([
-            'https://api.xendit.co/disbursements' => Http::response([
+        Http::fake(function ($request) {
+            if ($request->method() === 'GET') {
+                return Http::response([], 200);
+            }
+
+            return Http::response([
                 'error_code' => 'RECIPIENT_ACCOUNT_NUMBER_ERROR',
                 'message' => 'Invalid account number',
-            ], 400),
-        ]);
+            ], 400);
+        });
 
         $this->actingAs($admin)
             ->post(route('admin.withdrawals.approve', $withdrawal->id))
