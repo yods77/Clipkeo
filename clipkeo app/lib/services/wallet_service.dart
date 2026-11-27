@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -28,8 +29,8 @@ class WithdrawalRequestResult {
 }
 
 class WalletService {
-  static const String _pendingWithdrawalStorageKey =
-      'wallet_pending_withdrawal_attempt';
+  static const String _pendingWithdrawalStorageKeyPrefix =
+      'wallet_pending_withdrawal_attempt_';
 
   final String baseUrl = AppConfig.baseUrl;
   final http.Client _client;
@@ -65,9 +66,23 @@ class WalletService {
         '${hex.substring(20, 32)}';
   }
 
-  Future<Map<String, dynamic>?> getPendingWithdrawalAttempt() async {
+  String _pendingStorageKeyFor(Map<String, String> headers) {
+    final authorization = headers['Authorization'];
+    if (authorization == null || authorization.isEmpty) {
+      throw StateError('Authenticated user is required for pending withdrawal state.');
+    }
+
+    // Scope local retry state to the authenticated account without storing
+    // the bearer token a second time in the preference key.
+    final fingerprint = sha256.convert(utf8.encode(authorization)).toString();
+    return '$_pendingWithdrawalStorageKeyPrefix$fingerprint';
+  }
+
+  Future<Map<String, dynamic>?> _readPendingWithdrawalAttempt(
+    String storageKey,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_pendingWithdrawalStorageKey);
+    final raw = prefs.getString(storageKey);
 
     if (raw == null) return null;
 
@@ -82,9 +97,16 @@ class WalletService {
     return <String, dynamic>{'invalid': true};
   }
 
-  Future<void> _clearPendingWithdrawalAttempt() async {
+  Future<Map<String, dynamic>?> getPendingWithdrawalAttempt() async {
+    final headers = await _getHeaders();
+    if (!headers.containsKey('Authorization')) return null;
+
+    return _readPendingWithdrawalAttempt(_pendingStorageKeyFor(headers));
+  }
+
+  Future<void> _clearPendingWithdrawalAttempt(String storageKey) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_pendingWithdrawalStorageKey);
+    await prefs.remove(storageKey);
   }
 
   // --- 1. CEK STATUS PIN ---
@@ -186,10 +208,11 @@ class WalletService {
     }
 
     final prefs = await SharedPreferences.getInstance();
+    final pendingStorageKey = _pendingStorageKeyFor(headers);
     Map<String, dynamic>? pending;
 
     try {
-      pending = await getPendingWithdrawalAttempt();
+      pending = await _readPendingWithdrawalAttempt(pendingStorageKey);
     } catch (_) {
       return const WithdrawalRequestResult(
         status: WithdrawalRequestStatus.uncertain,
@@ -232,7 +255,7 @@ class WalletService {
     } else {
       idempotencyKey = _createIdempotencyKey();
       final saved = await prefs.setString(
-        _pendingWithdrawalStorageKey,
+        pendingStorageKey,
         jsonEncode({
           'idempotency_key': idempotencyKey,
           'amount': amount,
@@ -275,7 +298,7 @@ class WalletService {
 
       if (response.statusCode == 200 &&
           responseData['status'] == 'success') {
-        await _clearPendingWithdrawalAttempt();
+        await _clearPendingWithdrawalAttempt(pendingStorageKey);
 
         return WithdrawalRequestResult(
           status: WithdrawalRequestStatus.success,
