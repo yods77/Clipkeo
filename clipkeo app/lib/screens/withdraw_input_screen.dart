@@ -112,8 +112,10 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
     );
 
     // 3. PANGGIL API CEK PIN
-    bool hasPin = await _walletService.checkPinStatus();
+    final hasPin = await _walletService.checkPinStatus();
 
+    // Hindari memakai BuildContext setelah async jika layar sudah ditutup.
+    if (!mounted) return;
     Navigator.pop(context); // Tutup Loading
 
     // 4. TENTUKAN ARAH
@@ -236,6 +238,8 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
       methodId: selectedBankId!,
       pin: pin,
     );
+
+    if (!mounted) return;
     setState(() => _isSubmitting = false);
 
     if (success) {
