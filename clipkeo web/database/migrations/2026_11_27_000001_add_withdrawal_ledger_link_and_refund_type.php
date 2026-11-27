@@ -49,7 +49,7 @@ return new class extends Migration
                             $query->where('reference_id', 'WD-' . $id)
                                 ->orWhere('reference_id', 'like', 'WD-' . $id . '-%')
                                 ->orWhere('reference_id', 'like', 'WD-%-' . $id)
-                                ->orWhere('reference_id', 'like', 'WD-REJECT-' . $id . '%');
+;
                         })
                         ->orderByRaw('CASE WHEN external_ref IS NOT NULL THEN 0 ELSE 1 END')
                         ->orderByDesc('id')
