@@ -156,8 +156,6 @@ class WithdrawalController extends Controller
                 return ['state' => 'missing_method'];
             }
 
-            $wasProcessing = $withdrawal->status === 'processing';
-
             $ledger = app(WithdrawalLedgerService::class)
                 ->ensurePendingLedger($withdrawal);
 
@@ -172,7 +170,6 @@ class WithdrawalController extends Controller
             return [
                 'state' => 'ready',
                 'withdrawal_id' => $withdrawal->id,
-                'was_processing' => $wasProcessing,
                 'amount' => (int) round((float) $withdrawal->amount_final),
                 'bank_name' => $method->bank_name,
                 'account_number' => $method->account_number,
@@ -217,9 +214,6 @@ class WithdrawalController extends Controller
             'description' => 'Withdrawal Clipkeo',
         ];
 
-        // A processing request may have reached Xendit even if our first HTTP
-        // response was lost. Reconcile by external_id before any retry.
-        if ($prepared['was_processing']) {
             try {
                 $lookupResponse = Http::withBasicAuth($secretKey, '')
                     ->timeout(15)
