@@ -203,6 +203,8 @@ class WithdrawalController extends Controller
         $bankCode = $bankMap[$rawBank] ?? $rawBank;
         $accountNumber = preg_replace('/[^0-9]/', '', $prepared['account_number']);
         $externalId = $prepared['external_id'];
+        $appEnvironment = preg_replace('/[^A-Za-z0-9_-]/', '-', (string) config('app.env', 'production'));
+        $idempotencyKey = 'clipkeo-' . $appEnvironment . '-wd-' . $prepared['withdrawal_id'];
 
         $params = [
             'external_id' => $externalId,
@@ -217,7 +219,7 @@ class WithdrawalController extends Controller
             // X-IDEMPOTENCY-KEY and external_id remain stable across retries.
             $response = Http::asForm()
                 ->withBasicAuth($secretKey, '')
-                ->withHeaders(['X-IDEMPOTENCY-KEY' => $externalId])
+                ->withHeaders(['X-IDEMPOTENCY-KEY' => $idempotencyKey])
                 ->timeout(30)
                 ->post('https://api.xendit.co/disbursements', $params);
         } catch (Throwable $e) {
@@ -289,8 +291,10 @@ class WithdrawalController extends Controller
 
         // A definite client-side rejection means no transfer was accepted.
         // Duplicate/idempotency responses and server errors remain unresolved.
+        $ambiguousClientStatus = in_array($response->status(), [408, 409, 425, 429], true);
+
         if ($response->clientError()
-            && $response->status() !== 409
+            && !$ambiguousClientStatus
             && $errorCode !== 'DUPLICATE_TRANSACTION_ERROR') {
             $failed = app(WithdrawalLedgerService::class)->markFailed(
                 (int) $prepared['withdrawal_id'],
