@@ -60,10 +60,17 @@ class WalletController extends Controller
 
     public function withdraw(Request $request)
     {
+        // A client-generated key lets a retry safely recover the original request
+        // when the response was lost after the wallet debit committed.
+        $request->merge([
+            'idempotency_key' => $request->header('Idempotency-Key'),
+        ]);
+
         $request->validate([
             'amount' => 'required|integer|min:50000',
             'payout_method_id' => 'required|exists:payout_methods,id',
             'pin' => 'required|digits:6',
+            'idempotency_key' => 'required|string|uuid|max:64',
         ]);
 
         $user = $request->user();
@@ -87,6 +94,34 @@ class WalletController extends Controller
                 $lockedUser = User::whereKey($user->id)
                     ->lockForUpdate()
                     ->firstOrFail();
+
+                $existingWithdrawal = WithdrawalRequest::where('user_id', $lockedUser->id)
+                    ->where('idempotency_key', $request->input('idempotency_key'))
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($existingWithdrawal) {
+                    $samePayload = (int) $existingWithdrawal->amount_requested === (int) $request->amount
+                        && (int) $existingWithdrawal->payout_method_id === (int) $request->payout_method_id;
+
+                    if (!$samePayload) {
+                        return [
+                            'error' => response()->json([
+                                'status' => 'error',
+                                'message' => 'Kunci permintaan ini sudah digunakan untuk detail penarikan yang berbeda.',
+                            ], 409),
+                        ];
+                    }
+
+                    return [
+                        'withdrawal' => $existingWithdrawal,
+                        'amount' => (int) $existingWithdrawal->amount_requested,
+                        'fee' => (int) $existingWithdrawal->admin_fee,
+                        'final_amount' => (int) $existingWithdrawal->amount_final,
+                        'balance' => (float) $lockedUser->wallet_balance,
+                        'replayed' => true,
+                    ];
+                }
 
                 if ((float) $lockedUser->wallet_balance < (float) $request->amount) {
                     return [
@@ -117,6 +152,7 @@ class WalletController extends Controller
 
                 $withdrawal = WithdrawalRequest::create([
                     'user_id' => $lockedUser->id,
+                    'idempotency_key' => $request->input('idempotency_key'),
                     'amount_requested' => $amount,
                     'admin_fee' => $feeAmount,
                     'amount_final' => $finalAmount,
@@ -137,6 +173,7 @@ class WalletController extends Controller
                     'fee' => $feeAmount,
                     'final_amount' => $finalAmount,
                     'balance' => (float) $lockedUser->fresh()->wallet_balance,
+                    'replayed' => false,
                 ];
             });
 
@@ -146,21 +183,24 @@ class WalletController extends Controller
 
             $withdrawal = $result['withdrawal'];
 
-            // Notify only after the debit and ledger rows have committed.
-            try {
-                foreach (User::where('role', 'admin')->get() as $admin) {
-                    $admin->notify(new AdminActivityNotification($withdrawal, 'withdraw_request'));
-                }
+            // Do not duplicate notifications when an ambiguous client retry
+            // replays a withdrawal that was already committed.
+            if (!$result['replayed']) {
+                try {
+                    foreach (User::where('role', 'admin')->get() as $admin) {
+                        $admin->notify(new AdminActivityNotification($withdrawal, 'withdraw_request'));
+                    }
 
-                $withdrawal->load('user');
-                $withdrawal->user?->notify(
-                    new FinancialStatusNotification($withdrawal, 'withdrawal', 'pending')
-                );
-            } catch (Throwable $e) {
-                Log::warning('Gagal mengirim notifikasi API withdrawal.', [
-                    'withdrawal_id' => $withdrawal->id,
-                    'exception' => $e->getMessage(),
-                ]);
+                    $withdrawal->load('user');
+                    $withdrawal->user?->notify(
+                        new FinancialStatusNotification($withdrawal, 'withdrawal', 'pending')
+                    );
+                } catch (Throwable $e) {
+                    Log::warning('Gagal mengirim notifikasi API withdrawal.', [
+                        'withdrawal_id' => $withdrawal->id,
+                        'exception' => $e->getMessage(),
+                    ]);
+                }
             }
 
             return response()->json([
@@ -172,6 +212,7 @@ class WalletController extends Controller
                     'admin_fee' => $result['fee'],
                     'amount_received' => $result['final_amount'],
                     'sisa_saldo' => $result['balance'],
+                    'idempotent_replay' => $result['replayed'],
                 ],
             ], 200);
         } catch (Throwable $e) {
