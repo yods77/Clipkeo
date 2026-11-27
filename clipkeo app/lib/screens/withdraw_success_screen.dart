@@ -47,6 +47,8 @@ class WithdrawSuccessScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isRejected = withdrawalStatus == 'rejected';
+
     return AppBackgroundScaffold(
       child: SafeArea(
         child: Padding(
@@ -64,7 +66,9 @@ class WithdrawSuccessScreen extends StatelessWidget {
                   width: 120.w,
                   height: 120.w,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFC8FF00).withValues(alpha: 0.2), // Lime Transparan
+                    color: isRejected
+                          ? Colors.red.withValues(alpha: 0.12)
+                          : const Color(0xFFC8FF00).withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -72,7 +76,7 @@ class WithdrawSuccessScreen extends StatelessWidget {
                       width: 80.w,
                       height: 80.w,
                       decoration: const BoxDecoration(
-                        color: Color(0xFFC8FF00), // Lime Solid
+                        color: isRejected ? Colors.red : Color(0xFFC8FF00),
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
@@ -83,9 +87,9 @@ class WithdrawSuccessScreen extends StatelessWidget {
                         ],
                       ),
                       child: Icon(
-                        SolarIconsBold.checkCircle,
+                        isRejected ? Icons.error_outline_rounded : SolarIconsBold.checkCircle,
                         size: 40.sp,
-                        color: Colors.black,
+                        color: isRejected ? Colors.white : Colors.black,
                       ),
                     ),
                   ),
