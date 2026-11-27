@@ -65,7 +65,22 @@ class WalletController extends Controller
         $request->validate([
             'amount' => 'required|numeric|min:50000',
             'payout_method_id' => 'required|exists:payout_methods,id',
+            'pin' => 'required|digits:6',
         ]);
+
+        if (!$user->security_pin) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Anda belum mengatur PIN transaksi.',
+            ], 422);
+        }
+
+        if (!Hash::check($request->pin, $user->security_pin)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'PIN transaksi tidak valid.',
+            ], 401);
+        }
 
         // 2. Cek Kecukupan Saldo
         if ($user->wallet_balance < $request->amount) {
@@ -97,16 +112,46 @@ class WalletController extends Controller
         $finalAmount = $request->amount - $feeAmount; // Misal: 45.000 (Yang diterima user)
 
         // 4. EKSEKUSI TRANSAKSI DATABASE
+        $amount = (float) $request->amount;
+
         DB::beginTransaction();
         try {
-            // A. Potong Saldo User (Full Amount)
-            $user->decrement('wallet_balance', $request->amount);
+            // Re-lock saldo di dalam transaksi agar dua request bersamaan tidak dapat
+            // melewati pemeriksaan saldo yang sama.
+            $lockedUser = User::whereKey($user->id)->lockForUpdate()->firstOrFail();
 
-            // B. Buat Tiket Withdrawal Request
-            // Catatan: Saya menghapus kolom 'payment_provider' agar tidak error SQL
+            if ((float) $lockedUser->wallet_balance < $amount) {
+                DB::rollBack();
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Saldo tidak mencukupi untuk melakukan penarikan ini.',
+                ], 400);
+            }
+
+            $lockedBank = PayoutMethod::where('id', $request->payout_method_id)
+                ->where('user_id', $lockedUser->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$lockedBank) {
+                DB::rollBack();
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Metode pembayaran tidak valid atau bukan milik Anda.',
+                ], 400);
+            }
+
+            $bank = $lockedBank;
+            $feeAmount = $amount * $feeRate;
+            $finalAmount = $amount - $feeAmount;
+
+            // A. Potong saldo user secara atomik.
+            $lockedUser->decrement('wallet_balance', $amount);
+
+            // B. Buat tiket withdrawal request.
             $wd = WithdrawalRequest::create([
-                'user_id' => $user->id,
-                'amount_requested' => $request->amount, // Jumlah Kotor
+                'user_id' => $lockedUser->id,
+                'amount_requested' => $amount, // Jumlah Kotor
                 'amount_final' => $finalAmount,         // Jumlah Bersih (Setelah Fee)
                 'payout_method_id' => $bank->id,
                 'status' => 'pending',
@@ -134,7 +179,7 @@ class WalletController extends Controller
                 Transaction::create([
                     'user_id' => $user->id,
                     'type' => 'withdrawal',
-                    'amount' => $request->amount,
+                    'amount' => $amount,
                     'currency' => 'IDR',
                     'description' => 'Penarikan (Fee 10%) ke ' . $bank->bank_name,
                     'reference_id' => 'WD-' . $wd->id . '-' . Str::random(4),
@@ -153,7 +198,7 @@ class WalletController extends Controller
                     'amount_requested' => $request->amount,
                     'admin_fee' => $feeAmount,
                     'amount_received' => $finalAmount,
-                    'sisa_saldo' => $user->wallet_balance
+                    'sisa_saldo' => $lockedUser->fresh()->wallet_balance
                 ]
             ], 200);
 
