@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Models\WithdrawalRequest;
 use App\Notifications\FinancialStatusNotification; 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -102,6 +103,36 @@ class WebhookController extends Controller
             return response()->json(['message' => 'Invalid withdrawal reference'], 200);
         }
 
+        $withdrawalRecord = WithdrawalRequest::with('transaction')->find($withdrawalId);
+        if (!$withdrawalRecord) {
+            Log::warning('Webhook withdrawal merujuk request yang tidak ditemukan.', [
+                'withdrawal_id' => $withdrawalId,
+                'external_id' => $externalId,
+            ]);
+
+            return response()->json(['message' => 'Withdrawal not found'], 200);
+        }
+
+        $storedExternalId = $withdrawalRecord->transaction?->reference_id;
+        $appEnvironment = preg_replace('/[^A-Za-z0-9_-]/', '-', (string) config('app.env', 'production'));
+        $currentExternalId = 'WD-' . $appEnvironment . '-' . $withdrawalId;
+        $legacySimpleExternalId = 'WD-' . $withdrawalId;
+
+        // Only the saved reference or this environment's deterministic ID may
+        // settle a withdrawal. This blocks cross-environment ID collisions.
+        if ($externalId !== $storedExternalId
+            && $externalId !== $currentExternalId
+            && $externalId !== $legacySimpleExternalId) {
+            Log::critical('Webhook withdrawal ditolak karena referensinya tidak cocok.', [
+                'withdrawal_id' => $withdrawalId,
+                'external_id' => $externalId,
+                'stored_external_id' => $storedExternalId,
+                'expected_external_id' => $currentExternalId,
+            ]);
+
+            return response()->json(['message' => 'Withdrawal reference mismatch'], 200);
+        }
+
         $ledger = app(WithdrawalLedgerService::class);
         $providerId = $data['id'] ?? $data['disbursement_id'] ?? null;
 
@@ -127,6 +158,16 @@ class WebhookController extends Controller
                 Log::info('Withdrawal selesai dikonfirmasi Xendit.', [
                     'withdrawal_id' => $withdrawalId,
                     'external_id' => $externalId,
+                ]);
+            } elseif ($withdrawalRecord->status !== 'completed') {
+                // A late success after a refund may mean the recipient was paid
+                // while the wallet was already credited back. Do not debit again
+                // automatically; flag it for manual financial reconciliation.
+                Log::critical('Xendit melaporkan withdrawal berhasil setelah status lokal mencapai kondisi terminal non-completed.', [
+                    'withdrawal_id' => $withdrawalId,
+                    'external_id' => $externalId,
+                    'local_status' => $withdrawalRecord->status,
+                    'provider_id' => $providerId,
                 ]);
             }
         } elseif ($status === 'FAILED') {
