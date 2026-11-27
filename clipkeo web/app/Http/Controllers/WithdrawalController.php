@@ -173,7 +173,6 @@ class WithdrawalController extends Controller
                 'state' => 'ready',
                 'withdrawal_id' => $withdrawal->id,
                 'was_processing' => $wasProcessing,
-                'external_id' => 'WD-' . $withdrawal->id,
                 'amount' => (int) round((float) $withdrawal->amount_final),
                 'bank_name' => $method->bank_name,
                 'account_number' => $method->account_number,
@@ -205,8 +204,8 @@ class WithdrawalController extends Controller
 
         $bankCode = $bankMap[$rawBank] ?? $rawBank;
         $accountNumber = preg_replace('/[^0-9]/', '', $prepared['account_number']);
-        $externalId = $prepared['external_id'];
         $appEnvironment = preg_replace('/[^A-Za-z0-9_-]/', '-', (string) config('app.env', 'production'));
+        $externalId = 'WD-' . $appEnvironment . '-' . $prepared['withdrawal_id'];
         $idempotencyKey = 'clipkeo-' . $appEnvironment . '-wd-' . $prepared['withdrawal_id'];
 
         $params = [
