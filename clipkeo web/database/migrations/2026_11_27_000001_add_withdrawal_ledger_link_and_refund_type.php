@@ -64,6 +64,27 @@ return new class extends Migration
                             ->where('id', $legacyTransaction->id)
                             ->update(['withdrawal_request_id' => $id]);
                     }
+
+                    // The legacy controller marked the admin fee as success as
+                    // soon as Xendit accepted the request. Reconcile it to the
+                    // withdrawal's actual final state so pending fees are not
+                    // counted as platform revenue before the bank confirms.
+                    $feeStatus = match ($withdrawal->status) {
+                        'completed' => 'success',
+                        'rejected' => 'failed',
+                        default => 'pending',
+                    };
+
+                    $feeReferences = ['FEE-WD-' . $id];
+                    if ($legacyTransaction) {
+                        $feeReferences[] = 'FEE-' . $legacyTransaction->reference_id;
+                    }
+
+                    DB::table('transactions')
+                        ->where('user_id', $withdrawal->user_id)
+                        ->where('type', 'platform_fee')
+                        ->whereIn('reference_id', $feeReferences)
+                        ->update(['status' => $feeStatus]);
                 }
             });
     }
