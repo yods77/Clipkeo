@@ -22,7 +22,7 @@ class AdminController extends Controller
 
         // --- 1. DATA STATISTIK UTAMA ---
         // Karena Revenue muncul, berarti kolom 'amount' aman (numeric).
-        $platformRevenue = Transaction::where('type', 'platform_fee')->sum('amount');
+        $platformRevenue = Transaction::where('type', 'platform_fee')->where('status', 'success')->sum('amount');
         $pendingWithdrawalsCount = WithdrawalRequest::where('status', 'pending')->count();
         $pendingDepositsCount = Deposit::where('status', 'pending')->count();
         $totalUsers = User::count();
@@ -47,11 +47,16 @@ class AdminController extends Controller
         // --- 3. DATA CHART (VERSI PHP - ANTI GAGAL) ---
         // Kita ambil data mentahnya saja, lalu hitung pakai logika PHP
         $allTransactions = Transaction::with('user')
-            ->get(['id', 'user_id', 'type', 'amount']);
+            ->get(['id', 'user_id', 'type', 'amount', 'status']);
 
         // Prize dicatat pada dua ledger: pemasukan Clipper dan pengeluaran Publisher.
         // Pisahkan keduanya agar chart Admin tidak menyatukan makna transaksi.
-        $groupedData = $allTransactions->groupBy(function ($item) {
+        $groupedData = $allTransactions
+            ->filter(function ($item) {
+                // Pending/failed fees are not platform revenue.
+                return $item->type !== Transaction::TYPE_PLATFORM_FEE || $item->status === 'success';
+            })
+            ->groupBy(function ($item) {
             if ($item->type === Transaction::TYPE_BOUNTY_PRIZE) {
                 return $item->user?->role === 'publisher'
                     ? 'bounty_prize_publisher'
@@ -77,6 +82,7 @@ class AdminController extends Controller
             return match ($label) {
                 'bounty_prize_clipper' => 'Hadiah Clipper',
                 'bounty_prize_publisher' => 'Pembayaran Hadiah Publisher',
+                'withdrawal_refund' => 'Refund Withdrawal',
                 default => ucwords(str_replace('_', ' ', $label)),
             };
         }, $rawLabels);
