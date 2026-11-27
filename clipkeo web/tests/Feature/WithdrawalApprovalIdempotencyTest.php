@@ -64,7 +64,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
         Http::assertSentCount(1);
     }
 
-    public function test_admin_can_retry_an_ambiguous_timeout_with_the_same_idempotency_key(): void
+    public function test_admin_reconciles_an_ambiguous_timeout_before_any_second_transfer(): void
     {
         [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
         $postAttempts = 0;
