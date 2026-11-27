@@ -107,14 +107,71 @@ void main() {
       expect(attempts, 1);
     });
 
-    test('definitive validation rejection clears the pending attempt', () async {
+    test('invalid PIN response preserves the key for a safe retry', () async {
+      final sentKeys = <String>[];
+      var attempts = 0;
+
+      final client = MockClient((request) async {
+        attempts++;
+        sentKeys.add(
+          request.headers.entries
+              .firstWhere((entry) => entry.key.toLowerCase() == 'idempotency-key')
+              .value,
+        );
+
+        if (attempts == 1) {
+          return http.Response(
+            jsonEncode({
+              'status': 'error',
+              'message': 'PIN transaksi tidak valid.',
+            }),
+            401,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        return http.Response(
+          jsonEncode({
+            'status': 'success',
+            'message': 'Penarikan diterima.',
+            'data': {'wd_id': 43},
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      addTearDown(client.close);
+
+      final service = WalletService(client: client);
+      final rejected = await service.requestWithdraw(
+        amount: '50000',
+        methodId: 7,
+        pin: '000000',
+      );
+
+      expect(rejected.status, WithdrawalRequestStatus.uncertain);
+      expect(await service.getPendingWithdrawalAttempt(), isNotNull);
+
+      final retry = await service.requestWithdraw(
+        amount: '50000',
+        methodId: 7,
+        pin: '123456',
+      );
+
+      expect(retry.status, WithdrawalRequestStatus.success);
+      expect(sentKeys, hasLength(2));
+      expect(sentKeys[0], sentKeys[1]);
+      expect(await service.getPendingWithdrawalAttempt(), isNull);
+    });
+
+    test('definitive insufficient-balance response clears the pending attempt', () async {
       final client = MockClient((request) async {
         return http.Response(
           jsonEncode({
             'status': 'error',
-            'message': 'PIN transaksi tidak valid.',
+            'message': 'Saldo tidak mencukupi.',
           }),
-          401,
+          400,
           headers: {'content-type': 'application/json'},
         );
       });
@@ -124,7 +181,7 @@ void main() {
       final result = await service.requestWithdraw(
         amount: '50000',
         methodId: 7,
-        pin: '000000',
+        pin: '123456',
       );
 
       expect(result.status, WithdrawalRequestStatus.rejected);
