@@ -67,20 +67,20 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
     public function test_admin_can_retry_an_ambiguous_timeout_with_the_same_idempotency_key(): void
     {
         [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
-        $attempts = 0;
+        $postAttempts = 0;
+        $externalId = 'WD-' . $withdrawal->id;
 
-        Http::fake(function ($request) use (&$attempts) {
-            $attempts++;
-
-            if ($attempts === 1) {
-                throw new ConnectionException('Simulated network timeout');
+        Http::fake(function ($request) use (&$postAttempts, $externalId) {
+            if ($request->method() === 'GET') {
+                return Http::response([[
+                    'id' => 'xendit-disbursement-after-timeout',
+                    'external_id' => $externalId,
+                    'status' => 'PENDING',
+                ]], 200);
             }
 
-            return Http::response([
-                'id' => 'xendit-disbursement-after-retry',
-                'external_id' => $request['external_id'],
-                'status' => 'PENDING',
-            ], 200);
+            $postAttempts++;
+            throw new ConnectionException('Simulated network timeout');
         });
 
         $this->actingAs($admin)
@@ -95,13 +95,15 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
             ->assertRedirect();
 
         $this->assertSame(
-            'xendit-disbursement-after-retry',
+            'xendit-disbursement-after-timeout',
             $transaction->fresh()->external_ref
         );
 
         Http::assertSentCount(2);
+        $this->assertSame(1, $postAttempts);
         Http::assertSent(function ($request) use ($withdrawal) {
-            return $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id);
+            return $request->method() === 'POST'
+                && $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id);
         });
     }
 
