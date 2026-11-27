@@ -12,9 +12,13 @@ return new class extends Migration
         Schema::table('transactions', function (Blueprint $table) {
             $table->foreignId('withdrawal_request_id')
                 ->nullable()
-                ->unique('transactions_withdrawal_request_id_unique')
                 ->constrained('withdrawal_requests')
                 ->nullOnDelete();
+
+            $table->unique(
+                'withdrawal_request_id',
+                'transactions_withdrawal_request_id_unique'
+            );
         });
 
         // MySQL stores this column as ENUM. SQLite (used by the test suite)
