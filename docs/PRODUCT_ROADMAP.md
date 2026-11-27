@@ -306,3 +306,4 @@ Tambahkan entri terbaru di bawah ini setiap kali roadmap berubah atau keputusan 
 | Tanggal | Perubahan | Status |
 |---|---|---|
 | 2026-11-27 | Roadmap awal dibuat dari pemeriksaan struktur Flutter/Laravel, route, controller, model, dan UI Admin pada branch `fix/security-authentication`. | Baseline; perlu validasi dengan working tree lokal dan pengujian end-to-end |
+| 2026-11-27 | Financial/security hardening committed: canonical ledger types, atomic campaign refund and web/API withdrawal debits, server-side withdrawal PIN, webhook idempotency, route hardening, and regression tests. | Code committed to `fix/security-authentication`; tests and Flutter analysis not yet executed. Next: Xendit approval idempotency and one withdrawal-ledger lifecycle. |
