@@ -23,7 +23,7 @@ class AdminController extends Controller
         // --- 1. DATA STATISTIK UTAMA ---
         // Karena Revenue muncul, berarti kolom 'amount' aman (numeric).
         $platformRevenue = Transaction::where('type', 'platform_fee')->where('status', 'success')->sum('amount');
-        $pendingWithdrawalsCount = WithdrawalRequest::where('status', 'pending')->count();
+        $pendingWithdrawalsCount = WithdrawalRequest::whereIn('status', ['pending', 'processing'])->count();
         $pendingDepositsCount = Deposit::where('status', 'pending')->count();
         $totalUsers = User::count();
         $activeBounties = Bounty::where('status', 'active')->count();
@@ -39,8 +39,8 @@ class AdminController extends Controller
         $totalEscrowFunds = $totalUserBalances + $totalEscrowBounties;
 
         // --- 2. DATA TABEL ---
-        $latestWithdrawals = WithdrawalRequest::with('user')->where('status', 'pending')->latest()->take(5)->get();
-        $pendingWithdrawals = WithdrawalRequest::with('user')->where('status', 'pending')->latest()->get();
+        $latestWithdrawals = WithdrawalRequest::with('user')->whereIn('status', ['pending', 'processing'])->latest()->take(5)->get();
+        $pendingWithdrawals = WithdrawalRequest::with('user')->whereIn('status', ['pending', 'processing'])->latest()->get();
         $recentTransactions = Transaction::with('user')->latest()->take(10)->get();
         $pendingDeposits = Deposit::with('user')->where('status', 'pending')->latest()->get();
 
