@@ -130,6 +130,37 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
         ]);
     }
 
+    public function test_admin_rejection_refunds_gross_amount_and_does_not_refund_twice(): void
+    {
+        [$admin, $withdrawal, $transaction, $fee] = $this->createWithdrawal();
+
+        $this->actingAs($admin)
+            ->post(route('admin.withdrawals.reject', $withdrawal->id), [
+                'reason' => 'Dokumen rekening tidak valid',
+            ])
+            ->assertRedirect();
+
+        $this->assertSame(50000.0, (float) $withdrawal->user->fresh()->wallet_balance);
+        $this->assertSame('rejected', $withdrawal->fresh()->status);
+        $this->assertSame('failed', $transaction->fresh()->status);
+        $this->assertSame('failed', $fee->fresh()->status);
+        $this->assertDatabaseHas('transactions', [
+            'reference_id' => 'WRF-WD-' . $withdrawal->id,
+            'type' => Transaction::TYPE_WITHDRAWAL_REFUND,
+            'amount' => 50000,
+            'status' => 'success',
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.withdrawals.reject', $withdrawal->id), [
+                'reason' => 'Percobaan duplikat',
+            ])
+            ->assertRedirect();
+
+        $this->assertSame(50000.0, (float) $withdrawal->user->fresh()->wallet_balance);
+        $this->assertDatabaseCount('transactions', 3);
+    }
+
     private function createWithdrawal(): array
     {
         $user = User::factory()->create([
