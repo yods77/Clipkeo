@@ -60,6 +60,7 @@ class TransactionController extends Controller
                 Transaction::TYPE_BOUNTY_PRIZE,
                 Transaction::TYPE_BOUNTY_REFUND,
                 Transaction::TYPE_PLATFORM_FEE,
+                Transaction::TYPE_WITHDRAWAL_REFUND,
             ];
 
             if (in_array($type, $allowedTypes, true)) {
