@@ -1,6 +1,6 @@
 # Clipkeo — Project Handoff & Status
 
-> Dokumen ini adalah catatan induk untuk melanjutkan pengembangan dan pengujian Clipkeo lintas percakapan. Perbarui bagian status, pekerjaan berikutnya, dan riwayat revisi setiap kali ada perubahan kode atau hasil pengujian baru.
+> Dokumen ini adalah catatan induk untuk melanjutkan pengembangan dan pengujian Clipkeo lintas percakapan. Dokumen ini menyimpan posisi teknis terakhir. Untuk visi produk, evaluasi UX, rekomendasi fitur, prioritas skala, dan cara AI memberi saran proaktif, baca juga `docs/PRODUCT_ROADMAP.md`. Perbarui keduanya saat ada perubahan kode, keputusan produk, atau hasil pengujian baru.
 >
 > **Terakhir diperbarui:** 2026-11-27  
 > **Repository:** https://github.com/yods77/Clipkeo  
@@ -36,9 +36,11 @@ Jangan mencatat isi `.env`, password database, password akun, PIN, token, privat
 
 - Seluruh pengembangan dan pengujian dilakukan di branch `fix/security-authentication`.
 - `main` harus tetap stabil dan **tidak boleh di-merge** tanpa persetujuan eksplisit.
-- Commit terakhir yang terlihat pada terminal pengguna setelah pull pembaruan seeder adalah `dabda82` (`fix(seeder): sync all 38 Indonesian provinces`). Ini adalah **last-known commit dari terminal**, bukan jaminan HEAD saat dokumen dibaca kembali.
+- Pada pemeriksaan terminal 2026-11-27, `git fetch origin` menunjukkan branch lokal bergerak dari `8786709` dan `origin/fix/security-authentication` maju ke `36d668e`; `git status -sb` menunjukkan lokal **behind 1 commit**. Verifikasi SHA aktual dengan `git log -1 --oneline` sebelum sinkronisasi.
 - Sebelumnya pernah terlihat perubahan lokal belum di-commit pada `clipkeo app/lib/config.dart`. Periksa `git status --short` sebelum pull, reset, checkout, atau perubahan massal. Jangan menghapus perubahan lokal yang belum diperiksa.
-- Perubahan lokal pada `AdminBountyController.php` juga perlu diverifikasi status commit/push-nya: pemeriksaan lokal pengguna menunjukkan `bounty_refund` pada baris refund Admin, sedangkan salinan file branch yang diperiksa dari GitHub masih menunjukkan `refund`. Rekonsiliasi lokal vs remote adalah pekerjaan pertama saat melanjutkan.
+- Snapshot terminal terbaru menunjukkan tiga file lokal berubah dan belum di-commit: `clipkeo app/lib/config.dart`, `clipkeo web/app/Http/Controllers/AdminBountyController.php`, dan `clipkeo web/app/Http/Controllers/DashboardController.php`.
+- Diff `AdminBountyController.php` yang sudah dikirim pengguna menunjukkan satu perubahan: `type` dari `refund` menjadi `bounty_refund` pada pencatatan refund penolakan Admin. Ini benar menurut ENUM database, tetapi masih lokal; file remote pada branch acuan yang dibaca masih memakai `refund`.
+- Diff `config.dart` dan `DashboardController.php` belum diperiksa. Jangan pull/merge/rebase/reset/restore sebelum ketiga diff tersebut ditinjau dan diamankan. Setelah aman, sinkronkan commit dokumentasi remote tanpa menimpa perubahan lokal.
 
 Perintah awal setiap sesi kerja:
 
@@ -195,7 +197,7 @@ Perlu audit juga query filter, tampilan nominal masuk/keluar, label badge, dan t
 
 ## 9. Urutan pekerjaan berikutnya
 
-1. **Rekonsiliasi Git:** jalankan `git status --short`, `git log -1 --oneline`, dan periksa diff `AdminBountyController.php`. Pastikan perubahan lokal `bounty_refund` tidak hilang dan jangan menimpa perubahan `config.dart`.
+1. **Amankan working tree:** periksa `git diff -- app/Http/Controllers/AdminBountyController.php`, `git diff -- app/Http/Controllers/DashboardController.php`, dan `git diff -- "../clipkeo app/lib/config.dart"`. Pahami ketiga perubahan dan simpan aman (commit terpilah atau patch/stash yang sudah diverifikasi) sebelum sinkronisasi remote. Jangan menimpa perubahan lokal.
 2. **Audit seluruh pemakaian tipe:** cari di seluruh folder aplikasi, bukan hanya `app/`; periksa controller, service, model, query wallet, Blade, API, Flutter wallet, dan test.
 3. **Perbaiki refund Publisher:** `BountyController.php` agar menggunakan `bounty_refund`.
 4. **Standarisasi hadiah:** sesuaikan pencatatan Clipper dan Publisher pada `SubmissionController.php` dan `AdminBountyController.php` dengan `bounty_prize`, setelah memastikan arah saldo dan ledger benar.
@@ -204,11 +206,17 @@ Perlu audit juga query filter, tampilan nominal masuk/keluar, label badge, dan t
 7. Jalankan `php artisan test`, lint file PHP yang berubah, lalu uji alur end-to-end dengan data pengujian baru yang tidak menyebabkan refund/payout ganda.
 8. Periksa `git diff`, commit hanya file yang relevan ke `fix/security-authentication`, dan jangan merge ke `main`.
 
-## 10. Cara melanjutkan pada percakapan baru
+## 10. Strategi produk dan pengembangan jangka panjang
+
+Dokumen strategi terpisah tersedia di [`docs/PRODUCT_ROADMAP.md`](https://github.com/yods77/Clipkeo/blob/fix/security-authentication/docs/PRODUCT_ROADMAP.md). Dokumen tersebut memuat peta fitur Flutter/Laravel yang terlihat, temuan audit awal, journey Clipper/Publisher/Admin, rekomendasi UI/UX, admin operations, keamanan, integritas finansial, kesiapan skala, metrik produk, serta roadmap prioritas P0–P3.
+
+AI yang melanjutkan proyek harus membaca kedua dokumen: handoff untuk posisi teknis dan roadmap untuk arah produk. Jangan hanya meneruskan bug terakhir; selalu evaluasi prioritas berikutnya berdasarkan dampak pengguna, risiko keuangan/keamanan, efisiensi Admin, dan dependensi teknis. Bedakan fitur yang ada di kode, fitur yang sudah diuji, dan ide yang masih berupa rekomendasi.
+
+## 11. Cara melanjutkan pada percakapan baru
 
 Gunakan instruksi ini:
 
-> Lanjutkan proyek Clipkeo dari repository GitHub yods77/Clipkeo. Baca `docs/PROJECT_HANDOFF.md` pada branch `fix/security-authentication`, periksa commit terbaru dan perubahan lokal yang saya laporkan. Jangan mulai dari awal, jangan merge ke `main`, jangan menghapus perubahan lokal. Lanjutkan dari bagian “Audit tipe transaksi — pekerjaan yang masih terbuka”.
+> Lanjutkan Clipkeo dari repository https://github.com/yods77/Clipkeo. Baca `docs/PROJECT_HANDOFF.md` dan `docs/PRODUCT_ROADMAP.md` pada branch `fix/security-authentication`. Audit branch, commit, dan perubahan lokal terbaru sebelum mengubah kode. Lanjutkan pekerjaan terakhir, tetapi tetap bertindak sebagai partner product engineering: evaluasi UX Clipper, Publisher, Admin, keamanan, keuangan, skalabilitas, dan rekomendasikan prioritas pengembangan berikutnya. Bedakan fitur yang sudah ada, yang sudah diuji, dan yang baru berupa rekomendasi. Jangan merge ke `main`, jangan menghapus perubahan lokal, dan jangan mengubah kebijakan finansial tanpa persetujuan.
 
 Setiap kali ada revisi repository atau hasil pengujian baru:
 1. Periksa commit/diff yang berubah.
@@ -218,3 +226,9 @@ Setiap kali ada revisi repository atau hasil pengujian baru:
 5. Jangan mencatat password, PIN, token, atau secret.
 
 **Catatan pembaruan:** dokumen ini tidak otomatis mengetahui hasil pengujian manual di komputer pengguna. Riwayat commit GitHub dapat diperiksa setiap sesi, sedangkan hasil uji lokal perlu dilaporkan pengguna atau disimpan dalam catatan ini setelah diverifikasi.
+
+### Pembaruan 2026-11-27 — dokumentasi produk
+- Dibuat `docs/PRODUCT_ROADMAP.md` (commit `d0deb4335f1424f46f4e8e003c0637289e9c6750`) sebagai dokumen arah produk dan rekomendasi pengembangan jangka panjang.
+- Commit dokumentasi handoff sebelumnya: `36d668e84a32b77adaf129e1d4dfa58150d39175`.
+- Perubahan working tree lokal terbaru dari pengguna: tiga file modified; hanya diff `AdminBountyController.php` yang sudah ditinjau. `config.dart` dan `DashboardController.php` masih menunggu pemeriksaan.
+- Roadmap dibuat berdasarkan pembacaan kode branch `fix/security-authentication` pada commit `36d668e`; temuan dan rekomendasi harus diverifikasi ulang terhadap kode lokal terbaru sebelum implementasi.
