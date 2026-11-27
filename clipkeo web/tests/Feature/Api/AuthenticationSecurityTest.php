@@ -206,9 +206,10 @@ class AuthenticationSecurityTest extends TestCase
             ->assertJsonPath('data.0.account_number', '1111111111');
     }
 
-    public function test_cloudinary_debug_endpoint_is_not_exposed(): void
+    public function test_cloudinary_and_server_config_debug_endpoints_are_not_exposed(): void
     {
         $this->getJson('/api/cek-koneksi-cloud')->assertNotFound();
+        $this->getJson('/api/cek-config')->assertNotFound();
     }
 
     public function test_submission_endpoints_require_authentication(): void
