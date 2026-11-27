@@ -73,7 +73,7 @@ class WithdrawSuccessScreen extends StatelessWidget {
                 child: Column(
                   children: [
                     Text(
-                      "Withdrawal Berhasil",
+                      "Permintaan Penarikan Diterima",
                       style: TextStyle(
                         fontSize: 24.sp,
                         fontWeight: FontWeight.bold,
