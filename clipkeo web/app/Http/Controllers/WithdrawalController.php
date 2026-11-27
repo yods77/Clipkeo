@@ -170,10 +170,10 @@ class WithdrawalController extends Controller
             $ledger = app(WithdrawalLedgerService::class)
                 ->ensurePendingLedger($withdrawal);
 
-            $legacyExternalId = null;
+            $storedExternalId = null;
             if ($existingLedger
-                && preg_match('/^WD-\\d+-' . (int) $withdrawal->id . '$/', (string) $existingLedger->reference_id)) {
-                $legacyExternalId = $existingLedger->reference_id;
+                && preg_match('/^WD-[A-Za-z0-9_-]+-' . (int) $withdrawal->id . '$/', (string) $existingLedger->reference_id)) {
+                $storedExternalId = $existingLedger->reference_id;
             }
 
             $withdrawal->update(['status' => 'processing']);
@@ -183,7 +183,7 @@ class WithdrawalController extends Controller
                 'withdrawal_id' => $withdrawal->id,
                 'was_processing' => $wasProcessing,
                 'has_provider_reference' => !empty($ledger->external_ref),
-                'legacy_external_id' => $legacyExternalId,
+                'stored_external_id' => $storedExternalId,
                 'amount' => (int) round((float) $withdrawal->amount_final),
                 'bank_name' => $method->bank_name,
                 'account_number' => $method->account_number,
@@ -224,7 +224,7 @@ class WithdrawalController extends Controller
         $accountNumber = preg_replace('/[^0-9]/', '', $prepared['account_number']);
         $appEnvironment = preg_replace('/[^A-Za-z0-9_-]/', '-', (string) config('app.env', 'production'));
         $generatedExternalId = 'WD-' . $appEnvironment . '-' . $prepared['withdrawal_id'];
-        $externalId = $prepared['legacy_external_id'] ?: $generatedExternalId;
+        $externalId = $prepared['stored_external_id'] ?: $generatedExternalId;
         $idempotencyKey = 'clipkeo-' . $appEnvironment . '-wd-' . $prepared['withdrawal_id'];
 
         $params = [
@@ -286,12 +286,12 @@ class WithdrawalController extends Controller
         ));
 
         if (count($matchingDisbursements) === 0
-            && ($prepared['has_provider_reference'] || $prepared['legacy_external_id'])) {
+            && ($prepared['has_provider_reference'] || $prepared['stored_external_id'])) {
             Log::critical('Xendit tidak menemukan disbursement yang sudah direferensikan secara lokal.', [
                 'withdrawal_id' => $prepared['withdrawal_id'],
                 'external_id' => $externalId,
                 'has_provider_reference' => $prepared['has_provider_reference'],
-                'legacy_external_id' => $prepared['legacy_external_id'],
+                'stored_external_id' => $prepared['stored_external_id'],
             ]);
 
             return back()->with(
