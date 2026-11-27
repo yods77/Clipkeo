@@ -109,7 +109,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 'transactions' => $transactions,
                 'unread_notifications_count' => $user->unreadNotifications()->count(),
                 'payout_methods' => $user->payoutMethods,
-                'service_fee_pct' => 0.05,
+                'service_fee_pct' => 0.10,
                 'min_withdraw' => 50000,
             ],
         ]);
