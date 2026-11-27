@@ -296,8 +296,7 @@ class WalletService {
         // returned an unreadable body; the next wallet refresh can reconcile.
       }
 
-      if (response.statusCode == 200 &&
-          responseData['status'] == 'success') {
+      if (response.statusCode == 200) {
         await _clearPendingWithdrawalAttempt(pendingStorageKey);
 
         return WithdrawalRequestResult(
@@ -319,7 +318,7 @@ class WalletService {
           response.statusCode < 500 &&
           response.statusCode != 409 &&
           response.statusCode != 429) {
-        await _clearPendingWithdrawalAttempt();
+        await _clearPendingWithdrawalAttempt(pendingStorageKey);
 
         return WithdrawalRequestResult(
           status: WithdrawalRequestStatus.rejected,
