@@ -31,7 +31,7 @@ class BountyAuthorizationTest extends TestCase
             ->assertForbidden();
 
         $this->assertDatabaseCount('bounties', 0);
-        $this->assertSame('100000.00', (string) $clipper->fresh()->wallet_balance);
+        $this->assertSame(100000.0, (float) $clipper->fresh()->wallet_balance);
     }
 
     public function test_admin_cannot_use_publisher_campaign_creation_form(): void
