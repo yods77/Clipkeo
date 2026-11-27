@@ -39,7 +39,6 @@ class WithdrawalController extends Controller
     */
     public function store(Request $request)
     {
-        // A. Validasi Input (Saya tambahkan 'pin' harus 6 digit angka)
         $request->validate([
             'amount' => 'required|numeric|min:50000',
             'payout_method_id' => 'required|exists:payout_methods,id',
@@ -47,57 +46,77 @@ class WithdrawalController extends Controller
         ]);
 
         $user = auth()->user();
-        $method = \App\Models\PayoutMethod::whereKey($request->payout_method_id)
-            ->where('user_id', $user->id)
-            ->first();
 
-        if (!$method) {
-            return back()->withErrors([
-                'payout_method_id' => 'Metode pembayaran tidak valid atau bukan milik Anda.',
-            ]);
-        }
-
-        // B. Cek Kecukupan Saldo
-        if ($user->wallet_balance < $request->amount) {
-            return back()->with('error', 'Saldo tidak cukup untuk melakukan penarikan ini.');
-        }
-
-        // C. VALIDASI PIN (UPDATE UTAMA)
-        // Menggunakan withErrors() agar pesan merah otomatis muncul di Modal
         if (!Hash::check($request->pin, $user->security_pin)) {
             return back()->withErrors(['pin' => 'PIN Keamanan salah. Silakan coba lagi.']);
         }
 
-        // D. Hitung Fee (10%)
         $feePercentage = 0.10;
-        $feeAmount = $request->amount * $feePercentage;
-        $finalAmount = $request->amount - $feeAmount;
 
-        // E. Simpan Request ke Database
-        $withdrawal = WithdrawalRequest::create([
-            'user_id' => $user->id,
-            'payout_method_id' => $method->id,
-            'amount_requested' => $request->amount,
-            'admin_fee' => $feeAmount,
-            'amount_final' => $finalAmount,
-            'bank_info' => $method->bank_name . " (" . $method->account_number . ") a/n " . $method->account_name,
-            'status' => 'pending'
-        ]);
+        // Lock saldo dan rekening dalam satu transaksi agar request paralel tidak
+        // dapat memakai saldo yang sama atau memilih rekening milik user lain.
+        $result = DB::transaction(function () use ($request, $user, $feePercentage) {
+            $lockedUser = User::whereKey($user->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        // F. Kirim Notifikasi
-        $admins = User::where('role', 'admin')->get();
-        foreach ($admins as $admin) {
-            $admin->notify(new AdminActivityNotification($withdrawal, 'withdraw_request'));
-        }
+            $method = PayoutMethod::whereKey($request->payout_method_id)
+                ->where('user_id', $lockedUser->id)
+                ->lockForUpdate()
+                ->first();
 
-        // Load user relationship jika belum di-load
-        if (!$withdrawal->relationLoaded('user')) {
+            if (!$method) {
+                throw ValidationException::withMessages([
+                    'payout_method_id' => 'Metode pembayaran tidak valid atau bukan milik Anda.',
+                ]);
+            }
+
+            $amount = (float) $request->amount;
+            if ((float) $lockedUser->wallet_balance < $amount) {
+                throw ValidationException::withMessages([
+                    'amount' => 'Saldo tidak cukup untuk melakukan penarikan ini.',
+                ]);
+            }
+
+            $feeAmount = $amount * $feePercentage;
+            $finalAmount = $amount - $feeAmount;
+
+            $withdrawal = WithdrawalRequest::create([
+                'user_id' => $lockedUser->id,
+                'payout_method_id' => $method->id,
+                'amount_requested' => $amount,
+                'admin_fee' => $feeAmount,
+                'amount_final' => $finalAmount,
+                'bank_info' => $method->bank_name . " (" . $method->account_number . ") a/n " . $method->account_name,
+                'status' => 'pending',
+            ]);
+
+            $lockedUser->decrement('wallet_balance', $amount);
+
+            return [
+                'withdrawal' => $withdrawal,
+                'final_amount' => $finalAmount,
+            ];
+        });
+
+        $withdrawal = $result['withdrawal'];
+        $finalAmount = $result['final_amount'];
+
+        // Notifikasi dilakukan setelah commit; kegagalan notifikasi tidak boleh
+        // membatalkan atau membuat user mengulang transaksi keuangan.
+        try {
+            $admins = User::where('role', 'admin')->get();
+            foreach ($admins as $admin) {
+                $admin->notify(new AdminActivityNotification($withdrawal, 'withdraw_request'));
+            }
+
             $withdrawal->load('user');
+            $withdrawal->user?->notify(new FinancialStatusNotification($withdrawal, 'withdrawal', 'pending'));
+        } catch (\\Throwable $e) {
+            \\Illuminate\\Support\\Facades\\Log::warning(
+                'Gagal mengirim notifikasi withdrawal request: ' . $e->getMessage()
+            );
         }
-        $withdrawal->user->notify(new FinancialStatusNotification($withdrawal, 'withdrawal', 'pending'));
-
-        // G. POTONG SALDO USER
-        $user->decrement('wallet_balance', $request->amount);
 
         return redirect()->route('dashboard')->with(
             'success',
