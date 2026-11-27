@@ -52,13 +52,26 @@ class WalletWithdrawalPinTest extends TestCase
         $this->assertDatabaseHas('withdrawal_requests', [
             'user_id' => $user->id,
             'amount_requested' => 50000,
+            'admin_fee' => 5000,
+            'status' => 'pending',
+        ]);
+
+        $withdrawal = \\App\\Models\\WithdrawalRequest::where('user_id', $user->id)->firstOrFail();
+
+        $this->assertDatabaseHas('transactions', [
+            'user_id' => $user->id,
+            'withdrawal_request_id' => $withdrawal->id,
+            'type' => 'withdrawal',
+            'amount' => 45000,
+            'reference_id' => 'WD-' . $withdrawal->id,
             'status' => 'pending',
         ]);
 
         $this->assertDatabaseHas('transactions', [
             'user_id' => $user->id,
-            'type' => 'withdrawal',
-            'amount' => 50000,
+            'type' => 'platform_fee',
+            'amount' => 5000,
+            'reference_id' => 'FEE-WD-' . $withdrawal->id,
             'status' => 'pending',
         ]);
 
