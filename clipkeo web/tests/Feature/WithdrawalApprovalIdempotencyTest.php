@@ -84,11 +84,12 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
     {
         [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
         $postAttempts = 0;
+        $postRequest = null;
         $lookupAttempts = 0;
         $lookupExternalIds = [];
         $externalId = 'WD-testing-' . $withdrawal->id;
 
-        Http::fake(function ($request) use (&$postAttempts, &$lookupAttempts, &$lookupExternalIds, $externalId) {
+        Http::fake(function ($request) use (&$postAttempts, &$postRequest, &$lookupAttempts, &$lookupExternalIds, $externalId) {
             if ($request->method() === 'GET') {
                 $lookupAttempts++;
                 $lookupExternalId = (string) $request['external_id'];
@@ -108,6 +109,10 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
             }
 
             $postAttempts++;
+            // The fake throws before Laravel records a completed HTTP response.
+            // Capture the outgoing request here so the attempted POST and its
+            // idempotency key can still be asserted accurately.
+            $postRequest = $request;
             throw new ConnectionException('Simulated network timeout');
         });
 
@@ -135,10 +140,13 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
             $externalId,
             'WD-' . $withdrawal->id,
         ], $lookupExternalIds);
-        Http::assertSent(function ($request) use ($withdrawal) {
-            return $request->method() === 'POST'
-                && $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id);
-        });
+        $this->assertNotNull($postRequest);
+        $this->assertSame('POST', $postRequest->method());
+        $this->assertTrue($postRequest->hasHeader(
+            'X-IDEMPOTENCY-KEY',
+            'clipkeo-testing-wd-' . $withdrawal->id
+        ));
+        $this->assertSame($externalId, $postRequest['external_id']);
     }
 
     public function test_definite_xendit_rejection_refunds_the_full_amount_and_marks_fee_failed(): void
