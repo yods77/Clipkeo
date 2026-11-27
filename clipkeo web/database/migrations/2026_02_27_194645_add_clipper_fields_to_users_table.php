@@ -12,10 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('gender')->nullable()->after('phone_number');
-        $table->date('birthday')->nullable()->after('gender');
-        $table->string('province_id')->nullable()->after('birthday');
-        $table->string('city_id')->nullable()->after('province_id');
+            if (!Schema::hasColumn('users', 'gender')) {
+                $table->string('gender')->nullable()->after('phone_number');
+            }
+
+            if (!Schema::hasColumn('users', 'birthday')) {
+                $table->date('birthday')->nullable()->after('gender');
+            }
         });
     }
 
@@ -25,7 +28,13 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            //
+            if (Schema::hasColumn('users', 'birthday')) {
+                $table->dropColumn('birthday');
+            }
+
+            if (Schema::hasColumn('users', 'gender')) {
+                $table->dropColumn('gender');
+            }
         });
     }
 };
