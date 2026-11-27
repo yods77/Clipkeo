@@ -423,6 +423,7 @@ class _WalletScreenState extends State<WalletScreen> {
             transactionType == 'reward' ||
             (transactionType == 'bounty_prize' && userRole == 'clipper');
         final bool isWithdraw = !isIncome;
+        final bool isFailed = (trx['status'] ?? '').toString() == 'failed';
         return FadeInUp(
           // 🔥 2. Bungkus dengan FadeInUp
           // 🔥 3. Atur delay berdasarkan index (makin ke bawah makin lambat munculnya)
@@ -460,7 +461,8 @@ class _WalletScreenState extends State<WalletScreen> {
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 13.sp,
-                          color: Colors.black,
+                          color: isFailed ? Colors.grey[600] : Colors.black,
+                          decoration: isFailed ? TextDecoration.lineThrough : TextDecoration.none,
                           letterSpacing: -0.3,
                         ),
                       ),
@@ -475,6 +477,17 @@ class _WalletScreenState extends State<WalletScreen> {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
+                      if (isFailed) ...[
+                        SizedBox(height: 2.h),
+                        Text(
+                          'GAGAL',
+                          style: TextStyle(
+                            fontSize: 9.sp,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -485,7 +498,10 @@ class _WalletScreenState extends State<WalletScreen> {
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
                     fontSize: 12.sp,
-                    color: isWithdraw ? Colors.red[700] : Colors.green[700],
+                    color: isFailed
+                        ? Colors.grey[600]
+                        : (isWithdraw ? Colors.red[700] : Colors.green[700]),
+                    decoration: isFailed ? TextDecoration.lineThrough : TextDecoration.none,
                   ),
                 ),
               ],
