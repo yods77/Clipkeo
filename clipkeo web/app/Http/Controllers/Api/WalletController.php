@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\DB;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use App\Models\WithdrawalRequest;
-use App\Models\Transaction;
 use App\Models\PayoutMethod;
 use App\Notifications\AdminActivityNotification;
 use App\Notifications\FinancialStatusNotification;
