@@ -113,7 +113,7 @@ class WebhookController extends Controller
 
                 try {
                     $wd->user?->notify(new FinancialStatusNotification($wd, 'withdrawal', 'success'));
-                } catch (\\Exception $e) {
+                } catch (\Exception $e) {
                     Log::error('Gagal kirim notif withdrawal success: ' . $e->getMessage());
                 }
 
@@ -177,7 +177,7 @@ class WebhookController extends Controller
                         'rejected',
                         'Gagal Transfer Bank'
                     ));
-                } catch (\\Exception $e) {
+                } catch (\Exception $e) {
                     Log::error('Gagal kirim notif withdrawal fail: ' . $e->getMessage());
                 }
 
