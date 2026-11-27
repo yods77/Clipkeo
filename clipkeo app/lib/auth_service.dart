@@ -182,7 +182,23 @@ class AuthService {
       }
     }
 
+    // Keep unresolved withdrawal idempotency records across logout. The
+    // records contain only a request key and its amount/bank fingerprint, not
+    // the bearer token or transaction PIN. The next login for the same user
+    // can safely reconcile the original request.
+    final pendingWithdrawalAttempts = <String, String>{};
+    for (final key in prefs.getKeys()) {
+      if (key.startsWith('wallet_pending_withdrawal_attempt_')) {
+        final value = prefs.getString(key);
+        if (value != null) pendingWithdrawalAttempts[key] = value;
+      }
+    }
+
     await prefs.clear();
+
+    for (final entry in pendingWithdrawalAttempts.entries) {
+      await prefs.setString(entry.key, entry.value);
+    }
   }
 
   Future<Map<String, dynamic>> loginWithGoogle({
