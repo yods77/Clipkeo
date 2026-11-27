@@ -103,6 +103,7 @@ Route::middleware('auth:sanctum')->group(function () {
             'status' => true,
             'data' => [
                 'balance' => (int) $user->wallet_balance,
+                'role' => $user->role,
                 'reputation_points' => (int) $user->reputation_points,
                 'tier' => $user->getTierNameAttribute(),
                 'transactions' => $transactions,
@@ -451,14 +452,6 @@ if ($request->hasFile('analytics_file')) {
     }
 })->middleware('auth:sanctum');
 
-Route::get('/cek-config', function () {
-    return response()->json([
-        'post_max_size' => ini_get('post_max_size'),
-        'upload_max_filesize' => ini_get('upload_max_filesize'),
-        'memory_limit' => ini_get('memory_limit'),
-        'max_execution_time' => ini_get('max_execution_time'),
-    ]);
-});
 
 
 
