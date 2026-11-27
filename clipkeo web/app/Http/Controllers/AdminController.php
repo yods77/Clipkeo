@@ -57,18 +57,19 @@ class AdminController extends Controller
                 return $item->type !== Transaction::TYPE_PLATFORM_FEE || $item->status === 'success';
             })
             ->groupBy(function ($item) {
-            if ($item->type === Transaction::TYPE_BOUNTY_PRIZE) {
-                return $item->user?->role === 'publisher'
-                    ? 'bounty_prize_publisher'
-                    : 'bounty_prize_clipper';
-            }
+                if ($item->type === Transaction::TYPE_BOUNTY_PRIZE) {
+                    return $item->user?->role === 'publisher'
+                        ? 'bounty_prize_publisher'
+                        : 'bounty_prize_clipper';
+                }
 
-            return $item->type;
-        })->map(function ($row) {
-            return $row->sum(function ($item) {
-                return abs($item->amount);
+                return $item->type;
+            })
+            ->map(function ($row) {
+                return $row->sum(function ($item) {
+                    return abs($item->amount);
+                });
             });
-        });
 
         // Konversi ke format Array untuk Chart
         $chartData = $groupedData->toArray();
