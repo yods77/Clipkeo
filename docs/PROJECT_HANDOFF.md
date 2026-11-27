@@ -396,3 +396,39 @@ Jangan lakukan replace massal. Standarkan berdasarkan ENUM dan makna transaksi, 
 - Flutter mempertahankan idempotency key setelah HTTP 401/422 karena pemeriksaan PIN/validasi terjadi sebelum lookup idempotency di server; hal ini mencegah retry yang sah kehilangan key setelah request sebelumnya mungkin sudah commit.
 - Catatan test Flutter mencakup token renewal untuk user ID yang sama dan retry setelah timeout. Seluruh perubahan lanjutan tetap menunggu eksekusi lokal.
 - Posisi branch saat pembaruan ini: 179 commit ahead dan 0 behind dari `main`.
+
+## 15. 2026-11-27 — Submission API: missing video_id column
+
+### Temuan dari pengujian Android
+- Saat Clipper mengirim submission campaign dari aplikasi Android, API gagal dengan SQLSTATE[42S22], Unknown column 'video_id' in 'where clause'.
+- Query yang gagal adalah pencarian submissions.video_id menggunakan ID video TikTok.
+- Audit migration 2026_01_12_094226_create_clipsquad_full_schema.php menunjukkan tabel submissions dibuat tanpa kolom video_id.
+- App\Models\Submission, SubmissionController, dan handler POST /api/campaigns/{id}/submit sudah memakai video_id. Jadi penyebabnya adalah ketidaklengkapan migration schema, bukan kegagalan upload video atau koneksi Android.
+
+### Perbaikan yang ditambahkan ke branch
+1. Migration baru: 2026_11_27_000003_add_video_id_to_submissions_table.php.
+   - Menambahkan video_id sebagai VARCHAR(100), nullable agar submission lama tetap valid.
+   - Menambahkan index submissions_video_id_index untuk pencarian video.
+   - Tidak memakai unique index karena ID lintas platform belum dinamespace oleh platform; unique global berisiko menolak ID yang kebetulan sama di platform berbeda.
+2. Test baru: tests/Feature/SubmissionVideoIdSchemaTest.php.
+   - Menjalankan query Eloquent Submission::where('video_id', ...)->first() yang sebelumnya gagal.
+3. Keamanan respons API:
+   - Handler submission API tidak lagi mengirim pesan exception SQL mentah, nama database, host, port, atau query ke aplikasi.
+   - Detail exception dicatat di Laravel log; aplikasi menerima pesan server yang umum.
+
+### Status Git dan verifikasi
+- Semua perubahan dibuat hanya di fix/security-authentication.
+- HEAD branch setelah perubahan: 452812ed9e4fd205a972ff1ae8a22afeb7844965.
+- main tetap pada 3d291f00024df157218b03b2983478bd5d61e826; tidak ada merge ke main.
+- Test baru dan migration belum dijalankan pada komputer lokal pengguna. Jangan menyatakan submission sudah berhasil sampai migration diterapkan dan test lokal lulus.
+- Sebelum sinkronisasi di Windows, periksa git status -sb dan amankan perubahan lokal clipkeo app/lib/config.dart (IP LAN 192.168.18.3) serta perubahan lain. Jangan menimpa konfigurasi jaringan lokal pengguna.
+
+### Langkah verifikasi lokal berikutnya
+1. Pastikan working tree aman; stash hanya setelah memeriksa file yang berubah.
+2. Fast-forward fix/security-authentication ke remote HEAD.
+3. Jalankan php artisan migrate:status dan pastikan migration 2026_11_27_000003_add_video_id_to_submissions_table masih pending.
+4. Backup database lokal, lalu jalankan php artisan migrate (bukan migrate:fresh).
+5. Jalankan php artisan test --filter=SubmissionVideoIdSchemaTest, lalu seluruh php artisan test.
+6. Build dan install ulang APK bila diperlukan, lalu uji submission satu kali dengan data uji.
+7. Pastikan submission tersimpan satu kali, statusnya pending, bukti analytics tersimpan, dan campaign tidak mengurangi budget sampai approval sesuai desain produk.
+8. Pertahankan branch fix/security-authentication; jangan merge ke main tanpa instruksi eksplisit.
