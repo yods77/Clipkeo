@@ -79,104 +79,119 @@ class WebhookController extends Controller
      */
     private function handleWithdrawal($externalId, $status, $data)
     {
-        // --------------------------------------------------------------------
-        // KONDISI 1: TRANSFER BERHASIL (COMPLETED)
-        // --------------------------------------------------------------------
         if ($status === 'COMPLETED') {
-            DB::transaction(function () use ($externalId) {
-                
-                // A. Update Status di Tabel Transaksi (Laporan Keuangan)
-                Transaction::where('reference_id', $externalId)->update([
-                    'status' => 'success', 
+            $processed = DB::transaction(function () use ($externalId) {
+                $trx = Transaction::where('reference_id', $externalId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$trx || !in_array($trx->status, ['pending', 'processing'], true)) {
+                    return false;
+                }
+
+                $parts = explode('-', $externalId);
+                if (count($parts) < 3) {
+                    return false;
+                }
+
+                $wdId = end($parts);
+                $wd = WithdrawalRequest::whereKey($wdId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$wd || !in_array($wd->status, ['pending', 'processing'], true)) {
+                    return false;
+                }
+
+                $trx->update([
+                    'status' => 'success',
                     'paid_at' => now(),
-                    'description' => 'Withdrawal Berhasil Ditransfer'
+                    'description' => 'Withdrawal Berhasil Ditransfer',
                 ]);
 
-                // B. Update Status di Tabel Permintaan (WithdrawalRequest)
-                // Format ID kita: WD-{Timestamp}-{ID_Asli}
+                $wd->update(['status' => 'completed']);
+
+                try {
+                    $wd->user?->notify(new FinancialStatusNotification($wd, 'withdrawal', 'success'));
+                } catch (\\Exception $e) {
+                    Log::error('Gagal kirim notif withdrawal success: ' . $e->getMessage());
+                }
+
+                return true;
+            });
+
+            if ($processed) {
+                Log::info('Withdrawal Sukses: ' . $externalId);
+            }
+        } elseif ($status === 'FAILED') {
+            $failureCode = $data['failure_code'] ?? 'Bank Error';
+
+            $processed = DB::transaction(function () use ($externalId, $failureCode) {
+                $trx = Transaction::where('reference_id', $externalId)
+                    ->lockForUpdate()
+                    ->first();
+
+                // Hanya transisi pending/processing yang boleh mengembalikan saldo.
+                // Callback gagal yang duplikat atau datang setelah sukses diabaikan.
+                if (!$trx || !in_array($trx->status, ['pending', 'processing'], true)) {
+                    return false;
+                }
+
                 $parts = explode('-', $externalId);
-                
-                if (count($parts) >= 3) {
-                    $wdId = end($parts); // Mengambil angka terakhir sebagai ID
-                    
-                    $wd = WithdrawalRequest::find($wdId);
-                    
-                    // Pastikan hanya memproses yang statusnya masih pending/processing
-                    if ($wd && in_array($wd->status, ['pending', 'processing'])) {
-                        
-                        // Tandai request selesai
-                        $wd->update(['status' => 'completed']);
-
-                        // C. Kirim Notifikasi Sukses ke User (Clipper)
-                        try {
-                            $wd->user->notify(new FinancialStatusNotification($wd, 'withdrawal', 'success'));
-                        } catch (\Exception $e) {
-                            Log::error('Gagal kirim notif withdrawal success: ' . $e->getMessage());
-                        }
-                    }
+                if (count($parts) < 3) {
+                    return false;
                 }
-            });
-            Log::info('Withdrawal Sukses: ' . $externalId);
-        }
-        
-        // --------------------------------------------------------------------
-        // KONDISI 2: TRANSFER GAGAL (FAILED) -> SAFETY NET / REFUND
-        // --------------------------------------------------------------------
-        elseif ($status === 'FAILED') {
-            DB::transaction(function () use ($externalId, $data) {
-                // Cari data transaksi berdasarkan ID Xendit
-                $trx = Transaction::where('reference_id', $externalId)->first();
-                
-                // Pastikan transaksi ada dan belum ditandai failed sebelumnya
-                if ($trx && $trx->status !== 'failed') {
-                    
-                    // A. Update Status Transaksi jadi Failed
-                    $trx->update([
-                        'status' => 'failed', 
-                        'description' => 'Gagal: ' . ($data['failure_code'] ?? 'Bank Error')
-                    ]);
-                    
-                    // B. [CRITICAL] REFUND SALDO USER
-                    // Uang dikembalikan ke dompet user karena transfer gagal
-                    $user = User::find($trx->user_id);
-                    if ($user) {
-                        $user->increment('wallet_balance', $trx->amount);
-                    }
 
-                    // C. Update Status Request jadi Rejected
-                    $parts = explode('-', $externalId);
-                    if (count($parts) >= 3) {
-                        $wdId = end($parts);
-                        $wd = WithdrawalRequest::find($wdId);
-                        if ($wd) {
-                            $wd->update([
-                                'status' => 'rejected',
-                                'rejection_reason' => 'Bank Error: ' . ($data['failure_code'] ?? 'Unknown')
-                            ]);
+                $wdId = end($parts);
+                $wd = WithdrawalRequest::whereKey($wdId)
+                    ->lockForUpdate()
+                    ->first();
 
-                            // D. Kirim Notifikasi Gagal ke User
-                            try {
-                                $wd->user->notify(new FinancialStatusNotification($wd, 'withdrawal', 'rejected', 'Gagal Transfer Bank'));
-                            } catch (\Exception $e) {
-                                Log::error('Gagal kirim notif withdrawal fail: ' . $e->getMessage());
-                            }
-                        }
-                    }
+                if (!$wd || !in_array($wd->status, ['pending', 'processing'], true)) {
+                    return false;
                 }
+
+                $trx->update([
+                    'status' => 'failed',
+                    'description' => 'Gagal: ' . $failureCode,
+                ]);
+
+                $user = User::withTrashed()
+                    ->whereKey($trx->user_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($user) {
+                    $user->increment('wallet_balance', $trx->amount);
+                }
+
+                $wd->update([
+                    'status' => 'rejected',
+                    'rejection_reason' => 'Bank Error: ' . $failureCode,
+                ]);
+
+                try {
+                    $wd->user?->notify(new FinancialStatusNotification(
+                        $wd,
+                        'withdrawal',
+                        'rejected',
+                        'Gagal Transfer Bank'
+                    ));
+                } catch (\\Exception $e) {
+                    Log::error('Gagal kirim notif withdrawal fail: ' . $e->getMessage());
+                }
+
+                return true;
             });
-            Log::warning('Withdrawal Gagal & Refunded: ' . $externalId);
+
+            if ($processed) {
+                Log::warning('Withdrawal Gagal & Refunded: ' . $externalId);
+            }
         }
 
         return response()->json(['message' => 'Withdrawal Processed'], 200);
     }
 
-    /**
-     * ============================================================================
-     * PRIVATE: HANDLE DEPOSIT (LOGIKA TOP UP SALDO)
-     * ============================================================================
-     * Menangani logika saat Publisher melakukan pembayaran (Top Up).
-     * - Jika SUKSES: Tambah saldo wallet publisher otomatis.
-     */
     private function handleDeposit($externalId, $status, $data)
     {
         // --------------------------------------------------------------------
