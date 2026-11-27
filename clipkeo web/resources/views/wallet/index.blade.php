@@ -174,6 +174,7 @@
                                                 ['label' => 'Refund Dana', 'value' => 'bounty_refund'],
                                                 ['label' => 'Hold Dana', 'value' => 'bounty_hold'],
                                                 ['label' => 'Withdrawal', 'value' => 'withdrawal'],
+                                                ['label' => 'Refund Withdrawal', 'value' => 'withdrawal_refund'],
                                                 ['label' => 'Biaya Admin', 'value' => 'platform_fee'],
                                             ];
                                         @endphp
