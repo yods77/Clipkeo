@@ -75,6 +75,8 @@ class BountyController extends Controller
     */
     public function create()
     {
+        $this->authorizePublisher();
+
         return view('bounties.create');
     }
 
@@ -87,6 +89,8 @@ class BountyController extends Controller
     */
     public function store(Request $request)
     {
+        $this->authorizePublisher();
+
         // A. Validasi Input Dasar
         $request->validate([
             'image' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
@@ -237,6 +241,8 @@ class BountyController extends Controller
     */
     public function edit($id)
     {
+        $this->authorizePublisher();
+
         $bounty = Bounty::findOrFail($id);
         if ($bounty->publisher_id !== Auth::id()) abort(403);
         return view('bounties.edit', compact('bounty'));
@@ -249,6 +255,8 @@ class BountyController extends Controller
     */
     public function update(Request $request, $id)
     {
+        $this->authorizePublisher();
+
         $bounty = Bounty::findOrFail($id);
         if ($bounty->publisher_id !== Auth::id()) abort(403);
 
@@ -290,6 +298,8 @@ class BountyController extends Controller
     */
     public function destroy($id)
     {
+        $this->authorizePublisher();
+
         $bounty = Bounty::findOrFail($id);
         if (($bounty->publisher_id ?? $bounty->user_id) !== auth()->id()) abort(403);
 
@@ -341,6 +351,8 @@ class BountyController extends Controller
     */
     public function submissions($id)
     {
+        $this->authorizePublisher();
+
         $bounty = Bounty::findOrFail($id);
 
         // Validasi Pemilik
@@ -386,6 +398,15 @@ class BountyController extends Controller
     |--------------------------------------------------------------------------
     | Halaman detail campaign yang dilihat oleh Clipper.
     */
+    private function authorizePublisher(): void
+    {
+        abort_unless(
+            auth()->check() && auth()->user()->role === 'publisher',
+            403,
+            'Fitur ini hanya tersedia untuk Publisher.'
+        );
+    }
+
     public function show(Bounty $bounty)
     {
         $bounty = Bounty::with('user')->findOrFail($bounty->id);

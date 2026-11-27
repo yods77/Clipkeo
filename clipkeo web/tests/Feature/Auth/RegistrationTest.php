@@ -91,6 +91,43 @@ class RegistrationTest extends TestCase
         ]);
     }
 
+    public function test_new_users_can_register_as_a_publisher(): void
+    {
+        DB::table('provinces')->insert([
+            'id' => '31',
+            'name' => 'DKI Jakarta',
+        ]);
+
+        DB::table('regencies')->insert([
+            'id' => '3171',
+            'province_id' => '31',
+            'name' => 'Jakarta Selatan',
+        ]);
+
+        $response = $this->post('/register', [
+            'name' => 'Test Publisher',
+            'phone_number' => '081234567891',
+            'email' => 'publisher@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+            'role' => 'publisher',
+            'gender' => 'Laki-laki',
+            'birthday' => '1990-01-01',
+            'province' => '31',
+            'city' => '3171',
+        ]);
+
+        $this->assertAuthenticated();
+        $response->assertRedirect(route('dashboard', absolute: false));
+
+        $this->assertDatabaseHas('users', [
+            'email' => 'publisher@example.com',
+            'role' => 'publisher',
+            'province_id' => '31',
+            'city_id' => '3171',
+        ]);
+    }
+
     public function test_registration_requires_all_profile_details(): void
     {
         $response = $this->from('/register')->post('/register', [
