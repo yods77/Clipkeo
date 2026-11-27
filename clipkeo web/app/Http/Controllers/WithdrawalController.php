@@ -48,7 +48,7 @@ class WithdrawalController extends Controller
 
         $user = auth()->user();
 
-        if (!Hash::check($request->pin, $user->security_pin)) {
+        if (!$user->security_pin || !Hash::check($request->pin, $user->security_pin)) {
             return back()->withErrors(['pin' => 'PIN Keamanan salah. Silakan coba lagi.']);
         }
 
@@ -156,13 +156,24 @@ class WithdrawalController extends Controller
                 return ['state' => 'missing_method'];
             }
 
+            $wasProcessing = $withdrawal->status === 'processing';
+            $existingLedger = $withdrawal->transaction()
+                ->lockForUpdate()
+                ->first();
+
+            // A legacy request could have reached Xendit before its transaction
+            // row was saved. Never create a fresh payout for that ambiguous state.
+            if ($wasProcessing && !$existingLedger) {
+                return ['state' => 'legacy_unknown'];
+            }
+
             $ledger = app(WithdrawalLedgerService::class)
                 ->ensurePendingLedger($withdrawal);
 
-            // A provider ID means Xendit already accepted this disbursement.
-            // Never submit a second transfer; wait for its webhook.
-            if (!empty($ledger->external_ref)) {
-                return ['state' => 'already_sent'];
+            $legacyExternalId = null;
+            if ($existingLedger
+                && preg_match('/^WD-\\d+-' . (int) $withdrawal->id . '$/', (string) $existingLedger->reference_id)) {
+                $legacyExternalId = $existingLedger->reference_id;
             }
 
             $withdrawal->update(['status' => 'processing']);
@@ -170,6 +181,9 @@ class WithdrawalController extends Controller
             return [
                 'state' => 'ready',
                 'withdrawal_id' => $withdrawal->id,
+                'was_processing' => $wasProcessing,
+                'has_provider_reference' => !empty($ledger->external_ref),
+                'legacy_external_id' => $legacyExternalId,
                 'amount' => (int) round((float) $withdrawal->amount_final),
                 'bank_name' => $method->bank_name,
                 'account_number' => $method->account_number,
@@ -185,8 +199,15 @@ class WithdrawalController extends Controller
             return back()->with('error', 'Rekening tujuan tidak ditemukan atau bukan milik pengguna.');
         }
 
-        if ($prepared['state'] === 'already_sent') {
-            return back()->with('success', 'Withdrawal sudah diterima Xendit. Menunggu konfirmasi webhook; transfer tidak dikirim ulang.');
+        if ($prepared['state'] === 'legacy_unknown') {
+            Log::critical('Withdrawal legacy berstatus processing tanpa ledger reference.', [
+                'withdrawal_id' => $id,
+            ]);
+
+            return back()->with(
+                'error',
+                'Withdrawal lama berstatus processing tetapi tidak memiliki referensi ledger. Sistem menahan pengiriman otomatis untuk mencegah transfer ganda. Periksa transaksi ini langsung di Dashboard Xendit.'
+            );
         }
 
         $rawBank = strtoupper(trim($prepared['bank_name']));
@@ -202,7 +223,8 @@ class WithdrawalController extends Controller
         $bankCode = $bankMap[$rawBank] ?? $rawBank;
         $accountNumber = preg_replace('/[^0-9]/', '', $prepared['account_number']);
         $appEnvironment = preg_replace('/[^A-Za-z0-9_-]/', '-', (string) config('app.env', 'production'));
-        $externalId = 'WD-' . $appEnvironment . '-' . $prepared['withdrawal_id'];
+        $generatedExternalId = 'WD-' . $appEnvironment . '-' . $prepared['withdrawal_id'];
+        $externalId = $prepared['legacy_external_id'] ?: $generatedExternalId;
         $idempotencyKey = 'clipkeo-' . $appEnvironment . '-wd-' . $prepared['withdrawal_id'];
 
         $params = [
@@ -262,6 +284,21 @@ class WithdrawalController extends Controller
             fn ($item) => is_array($item)
                 && ($item['external_id'] ?? null) === $externalId
         ));
+
+        if (count($matchingDisbursements) === 0
+            && ($prepared['has_provider_reference'] || $prepared['legacy_external_id'])) {
+            Log::critical('Xendit tidak menemukan disbursement yang sudah direferensikan secara lokal.', [
+                'withdrawal_id' => $prepared['withdrawal_id'],
+                'external_id' => $externalId,
+                'has_provider_reference' => $prepared['has_provider_reference'],
+                'legacy_external_id' => $prepared['legacy_external_id'],
+            ]);
+
+            return back()->with(
+                'error',
+                'Referensi transfer yang sudah tersimpan tidak ditemukan di Xendit. Sistem tidak akan mengirim transfer baru. Lakukan rekonsiliasi manual sebelum tindakan berikutnya.'
+            );
+        }
 
         if (count($matchingDisbursements) > 1) {
             Log::critical('Ditemukan lebih dari satu disbursement untuk satu withdrawal.', [
@@ -478,6 +515,7 @@ class WithdrawalController extends Controller
                 ->ensurePendingLedger($withdrawal, $externalId);
 
             $ledger->update([
+                'reference_id' => $externalId,
                 'external_ref' => $providerId ?: $ledger->external_ref,
                 'bank_code' => $bankCode,
                 'account_number' => $accountNumber,
