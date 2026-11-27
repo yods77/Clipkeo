@@ -88,7 +88,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
       ).showSnackBar(const SnackBar(content: Text("Minimal Rp 50.000")));
       return;
     }
-    if (amount > widget.maxBalance) {
+    if (amount > widget.maxBalance && !_hasPendingWithdrawalAttempt) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Saldo tidak cukup")));
@@ -252,7 +252,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
       _showSnackBar("Minimal penarikan adalah Rp 50.000", Colors.orange);
       return;
     }
-    if (rawAmount > widget.maxBalance) {
+    if (rawAmount > widget.maxBalance && !_hasPendingWithdrawalAttempt) {
       _showSnackBar("Saldo Anda tidak mencukupi", Colors.red);
       return;
     }
