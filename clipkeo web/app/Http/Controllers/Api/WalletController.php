@@ -61,7 +61,7 @@ class WalletController extends Controller
     public function withdraw(Request $request)
     {
         $request->validate([
-            'amount' => 'required|numeric|min:50000',
+            'amount' => 'required|integer|min:50000',
             'payout_method_id' => 'required|exists:payout_methods,id',
             'pin' => 'required|digits:6',
         ]);
@@ -111,9 +111,9 @@ class WalletController extends Controller
                     ];
                 }
 
-                $amount = round((float) $request->amount, 2);
-                $feeAmount = round($amount * 0.10, 2);
-                $finalAmount = round($amount - $feeAmount, 2);
+                $amount = (int) $request->amount;
+                $feeAmount = (int) round($amount * 0.10);
+                $finalAmount = $amount - $feeAmount;
 
                 $withdrawal = WithdrawalRequest::create([
                     'user_id' => $lockedUser->id,
