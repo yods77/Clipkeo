@@ -80,9 +80,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
   void _validatePinAndWithdraw() async {
 
     // 1. VALIDASI DASAR (KODE LAMA KAMU)
-    double amount =
-        double.tryParse(inputAmount.replaceAll('.', '')) ??
-        0; // Tambah replaceAll biar aman
+    final double amount = double.tryParse(inputAmount) ?? 0;
     if (amount < 50000) {
       ScaffoldMessenger.of(
         context,
