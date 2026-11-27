@@ -121,7 +121,7 @@ Future<Map<String, String>> _getHeaders() async {
    * -- REQUEST WITHDRAW --
    * Mengirim permintaan penarikan dana.
    */
-  Future<bool> requestWithdraw({required String amount, required int methodId}) async {
+  Future<bool> requestWithdraw({required String amount, required int methodId, required String pin}) async {
     try {
       final headers = await _getHeaders();
       if (!headers.containsKey('Authorization')) return false;
@@ -132,6 +132,7 @@ Future<Map<String, String>> _getHeaders() async {
         body: {
           'amount': amount,
           'payout_method_id': methodId.toString(),
+          'pin': pin,
         },
         headers: headers,
       );
