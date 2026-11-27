@@ -347,13 +347,16 @@ class WalletService {
       // before the server looks up an earlier committed request. Clearing it
       // here could turn a retry into a second debit. 409, 429 and 5xx also
       // require the original key to remain available.
+      final retryMessage = response.statusCode == 401 ||
+              response.statusCode == 422
+          ? 'Pemeriksaan sesi, PIN, atau data belum berhasil. Kunci permintaan tetap disimpan. Periksa kembali lalu ulangi dengan nominal dan rekening yang sama. $message'
+          : 'Status penarikan belum dapat dipastikan. Coba lagi dengan nominal dan rekening yang sama. $message';
+
       return WithdrawalRequestResult(
         status: response.statusCode == 409
             ? WithdrawalRequestStatus.pendingRequestMismatch
             : WithdrawalRequestStatus.uncertain,
-        message: response.statusCode == 409
-            ? message
-            : 'Status penarikan belum dapat dipastikan. Coba lagi dengan nominal dan rekening yang sama. $message',
+        message: response.statusCode == 409 ? message : retryMessage,
       );
     } catch (_) {
       // Timeout or connection loss can happen after the server committed.
