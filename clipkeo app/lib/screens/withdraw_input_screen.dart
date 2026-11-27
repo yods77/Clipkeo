@@ -738,8 +738,9 @@ class _PinInputDialogState extends State<_PinInputDialog> {
 
       if (response.statusCode == 200) {
         if (mounted) {
+          final verifiedPin = _pinController.text;
           Navigator.pop(context); // Tutup Popup
-          widget.onPinSuccess(_pinController.text); // Lanjut Withdraw dengan PIN
+          widget.onPinSuccess(verifiedPin); // Lanjut Withdraw dengan PIN
         }
       } else {
         setState(() {
@@ -753,6 +754,12 @@ class _PinInputDialogState extends State<_PinInputDialog> {
     } finally {
       if (mounted) setState(() => isChecking = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
   }
 
   @override
