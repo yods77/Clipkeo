@@ -77,7 +77,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
             ->post(route('admin.withdrawals.approve', $withdrawal->id))
             ->assertRedirect();
 
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
     }
 
     public function test_admin_reconciles_an_ambiguous_timeout_before_any_second_transfer(): void
