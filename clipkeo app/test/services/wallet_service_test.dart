@@ -56,7 +56,11 @@ void main() {
       expect(firstResult.status, WithdrawalRequestStatus.uncertain);
       expect(await firstService.getPendingWithdrawalAttempt(), isNotNull);
 
-      // A new service instance simulates reopening the withdrawal screen/app.
+      // Simulate a new auth token after logout/login for the same account.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('token', 'renewed-api-token');
+
+      // A new service instance must still recover the same account's attempt.
       final retryService = WalletService(client: client);
       final retryResult = await retryService.requestWithdraw(
         amount: '50000',
