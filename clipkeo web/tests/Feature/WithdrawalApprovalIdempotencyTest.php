@@ -211,7 +211,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
                 ]], 200);
             }
 
-            throw new \\RuntimeException('A legacy payout must never be submitted again.');
+            throw new \RuntimeException('A legacy payout must never be submitted again.');
         });
 
         $this->actingAs($admin)
