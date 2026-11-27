@@ -499,3 +499,39 @@ Tujuan: cocokkan sisa budget campaign, saldo Clipper/Publisher, dan kedua sisi l
 - [ ] Verifikasi reward_amount dan remaining_budget Campaign #2.
 - [ ] Audit semantik payout_status partial/paid.
 - [ ] Pastikan migration approved_at tercatat dan dapat dijalankan pada database baru.
+
+
+## 17. Pembaruan 2026-11-27 — Rekonsiliasi reward Publisher approval selesai
+
+Pengguna menjalankan query read-only untuk Campaign #2, user ID 1 dan 2, serta transaksi `bounty_prize`. Hasil lokal yang dilaporkan:
+
+### Campaign #2
+- Title: `Campaign Uji Validasi`
+- Publisher ID: 2
+- Status: `active`
+- `reward_amount`: Rp1.000.000
+- `remaining_budget`: Rp950.000
+
+### Saldo pengguna
+- Clipper ID 1 (`Yoga Dwi`): `wallet_balance = Rp50.000`
+- Publisher ID 2 (`Publisher Testing`): `wallet_balance = Rp0`
+
+Publisher wallet Rp0 konsisten dengan dana campaign Rp1.000.000 yang telah di-hold sebelumnya; jangan menyimpulkan Publisher kembali didebit Rp50.000 dari wallet bebas. Biaya hadiah tercermin pada pengurangan `remaining_budget` dan ledger Publisher.
+
+### Ledger reward
+- Transaction ID 4, user ID 1 (Clipper), `bounty_prize`, Rp50.000, `success`, reference `RWD-20261127-1-4LEg`.
+- Transaction ID 5, user ID 2 (Publisher), `bounty_prize`, Rp50.000, `success`, reference `PAY-20261127-1-jixw`.
+
+### Kesimpulan pengujian
+- Reward Rp50.000 sudah benar-benar masuk ke saldo Clipper.
+- Sisa budget berkurang dari Rp1.000.000 menjadi Rp950.000, tepat sebesar reward.
+- Ledger hadiah tercatat pada sisi Clipper dan Publisher dengan nominal sama.
+- Query menunjukkan satu transaksi reward per sisi untuk Submission #1; tidak terlihat pembayaran ganda pada hasil query.
+- Alur Publisher approve → hitung reward → transfer saldo Clipper → pencatatan ledger dinyatakan lulus untuk skenario uji ini.
+
+### Catatan yang masih terbuka
+- `payout_status` pada Submission #1 masih `partial` walau seluruh reward yang terhitung pada persetujuan ini sudah dibayarkan. Pada implementasi saat ini, nilai tersebut ditentukan berdasarkan `remaining_budget <= 100`, yaitu kondisi budget campaign, bukan pelunasan reward submission. Jangan ubah kebijakan pembayaran; evaluasi dan perbaiki definisi/status UI secara terpisah setelah persetujuan.
+- Migration untuk kolom `approved_at` belum berhasil diidentifikasi pada file migration repository. Database lokal memang memiliki kolom itu, tetapi database baru belum boleh diasumsikan akan mendapatkannya.
+
+### Next test
+Buat submission baru dengan status `pending` pada campaign aktif yang memiliki budget cukup, biarkan Publisher tidak memprosesnya, tunggu minimal 5 menit sesuai aturan monitoring, lalu uji Admin Takeover pada submission baru tersebut. Jangan gunakan ulang Submission #1 yang sudah approved dan dibayar.
