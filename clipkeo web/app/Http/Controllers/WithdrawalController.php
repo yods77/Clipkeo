@@ -236,75 +236,79 @@ class WithdrawalController extends Controller
             'description' => 'Withdrawal Clipkeo',
         ];
 
-        try {
-            $lookupResponse = Http::withBasicAuth($secretKey, '')
-                ->timeout(15)
-                ->get('https://api.xendit.co/disbursements', [
-                    'external_id' => $externalId,
+        $lookupExternalIds = $prepared['stored_external_id']
+            ? [$prepared['stored_external_id']]
+            : array_values(array_unique(array_filter([
+                $generatedExternalId,
+                $prepared['was_processing'] ? 'WD-' . $prepared['withdrawal_id'] : null,
+            ])));
+
+        $matchingDisbursements = [];
+
+        foreach ($lookupExternalIds as $lookupExternalId) {
+            try {
+                $lookupResponse = Http::withBasicAuth($secretKey, '')
+                    ->timeout(15)
+                    ->get('https://api.xendit.co/disbursements', [
+                        'external_id' => $lookupExternalId,
+                    ]);
+            } catch (Throwable $e) {
+                Log::warning('Tidak dapat memeriksa status withdrawal di Xendit.', [
+                    'withdrawal_id' => $prepared['withdrawal_id'],
+                    'external_id' => $lookupExternalId,
+                    'exception' => $e->getMessage(),
                 ]);
-        } catch (Throwable $e) {
-            Log::warning('Tidak dapat memeriksa status withdrawal di Xendit.', [
-                'withdrawal_id' => $prepared['withdrawal_id'],
-                'external_id' => $externalId,
-                'exception' => $e->getMessage(),
-            ]);
 
-            return back()->with(
-                'error',
-                'Status transfer belum dapat diverifikasi ke Xendit. Tidak ada transfer baru yang dikirim. Periksa izin Money-out Read lalu coba lagi.'
-            );
-        }
+                return back()->with(
+                    'error',
+                    'Status transfer belum dapat diverifikasi ke Xendit. Tidak ada transfer baru yang dikirim. Periksa izin Money-out Read lalu coba lagi.'
+                );
+            }
 
-        if ($lookupResponse->status() === 404) {
-            $existingDisbursements = [];
-        } elseif ($lookupResponse->successful()) {
+            if ($lookupResponse->status() === 404) {
+                continue;
+            }
+
+            if (!$lookupResponse->successful()) {
+                Log::warning('Xendit menolak pemeriksaan status withdrawal.', [
+                    'withdrawal_id' => $prepared['withdrawal_id'],
+                    'external_id' => $lookupExternalId,
+                    'http_status' => $lookupResponse->status(),
+                ]);
+
+                return back()->with(
+                    'error',
+                    'Clipkeo belum dapat memverifikasi status transfer. Pastikan API key Xendit memiliki izin Money-out Read dan Money-out Write.'
+                );
+            }
+
             $existingDisbursements = $lookupResponse->json();
-        } else {
-            Log::warning('Xendit menolak pemeriksaan status withdrawal.', [
-                'withdrawal_id' => $prepared['withdrawal_id'],
-                'external_id' => $externalId,
-                'http_status' => $lookupResponse->status(),
-            ]);
+            if (!is_array($existingDisbursements)) {
+                return back()->with(
+                    'error',
+                    'Format status dari Xendit tidak dikenali. Withdrawal tetap diproses dan tidak dikirim ulang.'
+                );
+            }
 
-            return back()->with(
-                'error',
-                'Clipkeo belum dapat memverifikasi status transfer. Pastikan API key Xendit memiliki izin Money-out Read dan Money-out Write.'
-            );
-        }
-
-        if (!is_array($existingDisbursements)) {
-            return back()->with(
-                'error',
-                'Format status dari Xendit tidak dikenali. Withdrawal tetap diproses dan tidak dikirim ulang.'
-            );
-        }
-
-        $matchingDisbursements = array_values(array_filter(
-            $existingDisbursements,
-            fn ($item) => is_array($item)
-                && ($item['external_id'] ?? null) === $externalId
-        ));
-
-        if (count($matchingDisbursements) === 0
-            && ($prepared['has_provider_reference'] || $prepared['stored_external_id'])) {
-            Log::critical('Xendit tidak menemukan disbursement yang sudah direferensikan secara lokal.', [
-                'withdrawal_id' => $prepared['withdrawal_id'],
-                'external_id' => $externalId,
-                'has_provider_reference' => $prepared['has_provider_reference'],
-                'stored_external_id' => $prepared['stored_external_id'],
-            ]);
-
-            return back()->with(
-                'error',
-                'Referensi transfer yang sudah tersimpan tidak ditemukan di Xendit. Sistem tidak akan mengirim transfer baru. Lakukan rekonsiliasi manual sebelum tindakan berikutnya.'
-            );
+            foreach ($existingDisbursements as $disbursement) {
+                if (is_array($disbursement)
+                    && ($disbursement['external_id'] ?? null) === $lookupExternalId) {
+                    $matchingDisbursements[] = [
+                        'external_id' => $lookupExternalId,
+                        'disbursement' => $disbursement,
+                    ];
+                }
+            }
         }
 
         if (count($matchingDisbursements) > 1) {
             Log::critical('Ditemukan lebih dari satu disbursement untuk satu withdrawal.', [
                 'withdrawal_id' => $prepared['withdrawal_id'],
-                'external_id' => $externalId,
-                'disbursement_ids' => array_column($matchingDisbursements, 'id'),
+                'external_ids' => array_column($matchingDisbursements, 'external_id'),
+                'disbursement_ids' => array_map(
+                    fn ($match) => $match['disbursement']['id'] ?? null,
+                    $matchingDisbursements
+                ),
             ]);
 
             return back()->with(
@@ -314,7 +318,9 @@ class WithdrawalController extends Controller
         }
 
         if (count($matchingDisbursements) === 1) {
-            $existing = $matchingDisbursements[0];
+            $matched = $matchingDisbursements[0];
+            $externalId = $matched['external_id'];
+            $existing = $matched['disbursement'];
             $providerId = isset($existing['id']) ? (string) $existing['id'] : null;
             $existingStatus = strtoupper((string) ($existing['status'] ?? 'UNKNOWN'));
 
