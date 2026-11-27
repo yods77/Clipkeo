@@ -75,8 +75,9 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
 
     public function test_legacy_timestamp_external_id_still_refunds_the_full_amount(): void
     {
-        [$user, $withdrawal] = $this->createPendingWithdrawal();
+        [$user, $withdrawal, $transaction] = $this->createPendingWithdrawal();
         $legacyExternalId = 'WD-20261127-' . $withdrawal->id;
+        $transaction->update(['reference_id' => $legacyExternalId]);
 
         $this->sendWebhook($legacyExternalId, 'FAILED')
             ->assertOk();
@@ -89,6 +90,19 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
             'amount' => 50000,
             'status' => 'success',
         ]);
+    }
+
+    public function test_webhook_from_another_environment_cannot_settle_this_withdrawal(): void
+    {
+        [$user, $withdrawal, $transaction, $externalId] = $this->createPendingWithdrawal();
+        $foreignEnvironmentId = 'WD-production-' . $withdrawal->id;
+
+        $this->sendWebhook($foreignEnvironmentId, 'FAILED')
+            ->assertOk();
+
+        $this->assertSame(0.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame('processing', $withdrawal->fresh()->status);
+        $this->assertSame('pending', $transaction->fresh()->status);
     }
 
     private function createPendingWithdrawal(): array
