@@ -80,6 +80,7 @@ class WithdrawalLedgerService
 
             $transaction->update([
                 'withdrawal_request_id' => $withdrawal->id,
+                'reference_id' => $externalId ?: $transaction->reference_id,
                 'amount' => $withdrawal->amount_final,
                 'status' => 'success',
                 'external_ref' => $providerId ?: $transaction->external_ref,
@@ -136,6 +137,7 @@ class WithdrawalLedgerService
 
             $transaction->update([
                 'withdrawal_request_id' => $withdrawal->id,
+                'reference_id' => $externalId ?: $transaction->reference_id,
                 'amount' => $withdrawal->amount_final,
                 'status' => 'failed',
                 'description' => 'Withdrawal gagal: ' . $reason,
