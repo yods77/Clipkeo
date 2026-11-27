@@ -9,6 +9,7 @@ use App\Models\WithdrawalRequest;
 use App\Notifications\FinancialStatusNotification; 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Services\WithdrawalLedgerService;
 
 class WebhookController extends Controller
 {
@@ -79,113 +80,80 @@ class WebhookController extends Controller
      */
     private function handleWithdrawal($externalId, $status, $data)
     {
+        $withdrawalId = null;
+
+        // New references use WD-{withdrawal_id}; legacy references used
+        // WD-{timestamp}-{withdrawal_id}. Both formats remain supported.
+        if (preg_match('/^WD-(\\d+)$/', (string) $externalId, $matches)) {
+            $withdrawalId = (int) $matches[1];
+        } elseif (preg_match('/^WD-\\d+-(\\d+)$/', (string) $externalId, $matches)) {
+            $withdrawalId = (int) $matches[1];
+        }
+
+        if (!$withdrawalId) {
+            Log::warning('Webhook withdrawal diabaikan karena external_id tidak valid.', [
+                'external_id' => $externalId,
+            ]);
+
+            return response()->json(['message' => 'Invalid withdrawal reference'], 200);
+        }
+
+        $ledger = app(WithdrawalLedgerService::class);
+        $providerId = $data['id'] ?? $data['disbursement_id'] ?? null;
+
         if ($status === 'COMPLETED') {
-            $processed = DB::transaction(function () use ($externalId) {
-                $trx = Transaction::where('reference_id', $externalId)
-                    ->lockForUpdate()
-                    ->first();
+            $withdrawal = $ledger->markCompleted(
+                $withdrawalId,
+                (string) $externalId,
+                $providerId ? (string) $providerId : null
+            );
 
-                if (!$trx || !in_array($trx->status, ['pending', 'processing'], true)) {
-                    return false;
-                }
-
-                $parts = explode('-', $externalId);
-                if (count($parts) < 3) {
-                    return false;
-                }
-
-                $wdId = end($parts);
-                $wd = WithdrawalRequest::whereKey($wdId)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (!$wd || !in_array($wd->status, ['pending', 'processing'], true)) {
-                    return false;
-                }
-
-                $trx->update([
-                    'status' => 'success',
-                    'paid_at' => now(),
-                    'description' => 'Withdrawal Berhasil Ditransfer',
-                ]);
-
-                $wd->update(['status' => 'completed']);
-
+            if ($withdrawal) {
                 try {
-                    $wd->user?->notify(new FinancialStatusNotification($wd, 'withdrawal', 'success'));
-                } catch (\Exception $e) {
-                    Log::error('Gagal kirim notif withdrawal success: ' . $e->getMessage());
+                    $withdrawal->user?->notify(
+                        new FinancialStatusNotification($withdrawal, 'withdrawal', 'success')
+                    );
+                } catch (\\Throwable $e) {
+                    Log::warning('Gagal mengirim notifikasi withdrawal berhasil.', [
+                        'withdrawal_id' => $withdrawalId,
+                        'exception' => $e->getMessage(),
+                    ]);
                 }
 
-                return true;
-            });
-
-            if ($processed) {
-                Log::info('Withdrawal Sukses: ' . $externalId);
+                Log::info('Withdrawal selesai dikonfirmasi Xendit.', [
+                    'withdrawal_id' => $withdrawalId,
+                    'external_id' => $externalId,
+                ]);
             }
         } elseif ($status === 'FAILED') {
-            $failureCode = $data['failure_code'] ?? 'Bank Error';
+            $failureCode = (string) ($data['failure_code'] ?? 'BANK_ERROR');
 
-            $processed = DB::transaction(function () use ($externalId, $failureCode) {
-                $trx = Transaction::where('reference_id', $externalId)
-                    ->lockForUpdate()
-                    ->first();
+            $withdrawal = $ledger->markFailed(
+                $withdrawalId,
+                'Bank Error: ' . $failureCode,
+                (string) $externalId
+            );
 
-                // Hanya transisi pending/processing yang boleh mengembalikan saldo.
-                // Callback gagal yang duplikat atau datang setelah sukses diabaikan.
-                if (!$trx || !in_array($trx->status, ['pending', 'processing'], true)) {
-                    return false;
-                }
-
-                $parts = explode('-', $externalId);
-                if (count($parts) < 3) {
-                    return false;
-                }
-
-                $wdId = end($parts);
-                $wd = WithdrawalRequest::whereKey($wdId)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (!$wd || !in_array($wd->status, ['pending', 'processing'], true)) {
-                    return false;
-                }
-
-                $trx->update([
-                    'status' => 'failed',
-                    'description' => 'Gagal: ' . $failureCode,
-                ]);
-
-                $user = User::withTrashed()
-                    ->whereKey($trx->user_id)
-                    ->lockForUpdate()
-                    ->first();
-
-                if ($user) {
-                    $user->increment('wallet_balance', $trx->amount);
-                }
-
-                $wd->update([
-                    'status' => 'rejected',
-                    'rejection_reason' => 'Bank Error: ' . $failureCode,
-                ]);
-
+            if ($withdrawal) {
                 try {
-                    $wd->user?->notify(new FinancialStatusNotification(
-                        $wd,
+                    $withdrawal->user?->notify(new FinancialStatusNotification(
+                        $withdrawal,
                         'withdrawal',
                         'rejected',
-                        'Gagal Transfer Bank'
+                        'Transfer gagal (' . $failureCode . '). Seluruh nominal termasuk biaya admin telah dikembalikan.'
                     ));
-                } catch (\Exception $e) {
-                    Log::error('Gagal kirim notif withdrawal fail: ' . $e->getMessage());
+                } catch (\\Throwable $e) {
+                    Log::warning('Gagal mengirim notifikasi refund withdrawal.', [
+                        'withdrawal_id' => $withdrawalId,
+                        'exception' => $e->getMessage(),
+                    ]);
                 }
 
-                return true;
-            });
-
-            if ($processed) {
-                Log::warning('Withdrawal Gagal & Refunded: ' . $externalId);
+                Log::warning('Withdrawal gagal; pengembalian penuh telah dicatat.', [
+                    'withdrawal_id' => $withdrawalId,
+                    'external_id' => $externalId,
+                    'failure_code' => $failureCode,
+                ]);
             }
         }
 
