@@ -75,8 +75,8 @@ class WithdrawSuccessScreen extends StatelessWidget {
                     child: Container(
                       width: 80.w,
                       height: 80.w,
-                      decoration: const BoxDecoration(
-                        color: isRejected ? Colors.red : Color(0xFFC8FF00),
+                      decoration: BoxDecoration(
+                        color: isRejected ? Colors.red : const Color(0xFFC8FF00),
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
