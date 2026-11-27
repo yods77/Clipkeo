@@ -112,8 +112,8 @@ class WithdrawalController extends Controller
 
             $withdrawal->load('user');
             $withdrawal->user?->notify(new FinancialStatusNotification($withdrawal, 'withdrawal', 'pending'));
-        } catch (\\Throwable $e) {
-            \\Illuminate\\Support\\Facades\\Log::warning(
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
                 'Gagal mengirim notifikasi withdrawal request: ' . $e->getMessage()
             );
         }
