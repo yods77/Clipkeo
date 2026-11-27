@@ -156,6 +156,8 @@ class WithdrawalController extends Controller
                 return ['state' => 'missing_method'];
             }
 
+            $wasProcessing = $withdrawal->status === 'processing';
+
             $ledger = app(WithdrawalLedgerService::class)
                 ->ensurePendingLedger($withdrawal);
 
@@ -170,7 +172,7 @@ class WithdrawalController extends Controller
             return [
                 'state' => 'ready',
                 'withdrawal_id' => $withdrawal->id,
-                'was_processing' => $withdrawal->status === 'processing',
+                'was_processing' => $wasProcessing,
                 'external_id' => 'WD-' . $withdrawal->id,
                 'amount' => (int) round((float) $withdrawal->amount_final),
                 'bank_name' => $method->bank_name,
