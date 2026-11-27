@@ -70,6 +70,22 @@ class WithdrawalOwnershipTest extends TestCase
         ]);
 
         $this->assertSame(50000.0, (float) $user->fresh()->wallet_balance);
+
+        $withdrawal = \\App\\Models\\WithdrawalRequest::where('user_id', $user->id)->firstOrFail();
+        $this->assertSame(5000.0, (float) $withdrawal->admin_fee);
+        $this->assertDatabaseHas('transactions', [
+            'withdrawal_request_id' => $withdrawal->id,
+            'type' => 'withdrawal',
+            'amount' => 45000,
+            'reference_id' => 'WD-' . $withdrawal->id,
+            'status' => 'pending',
+        ]);
+        $this->assertDatabaseHas('transactions', [
+            'reference_id' => 'FEE-WD-' . $withdrawal->id,
+            'type' => 'platform_fee',
+            'amount' => 5000,
+            'status' => 'pending',
+        ]);
     }
 
     private function createClipper(): User
