@@ -341,7 +341,7 @@ Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, 
 
 **Publisher / Web**
 - [x] Publisher berhasil login dan membuat campaign uji; validasi field wajib berjalan.
-- [~] Alur review submission dan reward sudah menghasilkan record approved serta prize Rp50.000 pada Submission #1; rekonsiliasi saldo, ledger Publisher, dan remaining budget masih terbuka.
+- [x] Alur review Publisher dan reward Submission #1: status approved, saldo Clipper bertambah Rp50.000, dua transaksi ledger bounty_prize masing-masing Rp50.000 sukses, dan remaining budget Campaign #2 berkurang menjadi Rp950.000.
 - [ ] Uji campaign creation, hold budget, approval/rejection, pembatalan/refund, dan laporan performa secara end-to-end dengan data uji baru yang aman.
 - [ ] Uji filter/inbox submission, alasan penolakan, dan seluruh state loading/empty/error.
 
@@ -377,10 +377,10 @@ Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, 
 
 ### F. Pengujian aktif berikutnya
 
-1. Selesaikan rekonsiliasi Submission #1: baca Campaign #2 (`reward_amount`, `remaining_budget`), saldo user ID 1 dan 2, serta transaksi `bounty_prize` pada kedua akun.
-2. Audit semantik `payout_status`: kode saat ini menentukan `paid/partial` berdasarkan sisa budget campaign (`remaining_budget <= 100`), bukan semata-mata status pelunasan reward submission.
-3. Pastikan migration penambah `approved_at` ikut tercatat dalam repository dan migration video_id berstatus benar pada database lokal.
-4. Setelah rekonsiliasi selesai, buat submission uji baru untuk Admin Takeover; jangan mengulang approve atau refund pada data uji yang sudah final.
-5. Lanjutkan ke withdrawal Web/API dan simulasi webhook Xendit; gunakan data staging/test, bukan transfer uang sungguhan tanpa persetujuan.
+1. [x] Rekonsiliasi Submission #1 selesai: Campaign #2 `reward_amount` Rp1.000.000, `remaining_budget` Rp950.000; Clipper ID 1 wallet Rp50.000; Publisher ID 2 wallet Rp0; transaksi bounty_prize ID 4 dan 5 masing-masing Rp50.000 dan sukses.
+2. [~] Audit semantik `payout_status`: nilai `partial` pada Submission #1 berasal dari kondisi sisa budget campaign (`remaining_budget > 100`), bukan karena reward Rp50.000 belum dibayarkan. Jangan ubah aturan reward; evaluasi penamaan/status UI secara terpisah.
+3. [ ] Pastikan migration penambah `approved_at` ikut tercatat dalam repository dan migration video_id berstatus benar pada database lokal.
+4. [ ] Buat submission uji baru yang tetap pending untuk Admin Takeover; tunggu minimal 5 menit sesuai aturan monitoring. Jangan mengulang approve atau refund pada data uji yang sudah final.
+5. [ ] Lanjutkan ke withdrawal Web/API dan simulasi webhook Xendit; gunakan data staging/test, bukan transfer uang sungguhan tanpa persetujuan.
 
 **Aturan pencatatan:** status [x] hanya boleh dipakai untuk pekerjaan yang benar-benar telah diuji/dibuktikan. Implementasi yang baru ada di branch tetapi belum dijalankan tetap [~]. Hasil lokal yang belum dilaporkan tidak boleh dianggap lulus.
