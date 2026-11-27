@@ -257,7 +257,7 @@
                                         : auth()->user()->role;
 
                                     $isIncome = false;
-                                    if (in_array($trx->type, ['deposit', 'bounty_refund', 'refund', 'reward'], true)) {
+                                    if (in_array($trx->type, ['deposit', 'bounty_refund', 'refund', 'reward', 'withdrawal_refund'], true)) {
                                         $isIncome = true;
                                     } elseif ($trx->type === 'bounty_prize') {
                                         $isIncome = $transactionOwnerRole === 'clipper';
@@ -309,6 +309,10 @@
                                         case 'bounty_refund':
                                         case 'refund':
                                             $badgeLabel = 'Refund Dana';
+                                            $badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                            break;
+                                        case 'withdrawal_refund':
+                                            $badgeLabel = 'Refund Withdrawal';
                                             $badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
                                             break;
                                         case 'platform_fee':
