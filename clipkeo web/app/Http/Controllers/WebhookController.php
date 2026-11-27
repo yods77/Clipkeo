@@ -85,7 +85,8 @@ class WebhookController extends Controller
         // WD-{timestamp}-{withdrawal_id}. Both formats remain supported.
         if (preg_match('/^WD-(\\d+)$/', (string) $externalId, $matches)) {
             $withdrawalId = (int) $matches[1];
-        } elseif (preg_match('/^WD-\\d+-(\\d+)$/', (string) $externalId, $matches)) {
+        } elseif (preg_match('/^WD-[A-Za-z0-9_-]+-(\\d+)$/', (string) $externalId, $matches)) {
+            // Current environment-prefixed IDs and legacy WD-{timestamp}-{id}.
             $withdrawalId = (int) $matches[1];
         }
 
