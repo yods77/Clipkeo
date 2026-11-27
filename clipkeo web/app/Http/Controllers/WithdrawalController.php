@@ -340,12 +340,36 @@ class WithdrawalController extends Controller
                 );
 
                 if ($settled) {
-                    $settled->user?->notify(
-                        new FinancialStatusNotification($settled, 'withdrawal', 'success')
-                    );
+                    try {
+                        $settled->user?->notify(
+                            new FinancialStatusNotification($settled, 'withdrawal', 'success')
+                        );
+                    } catch (Throwable $notificationError) {
+                        Log::warning('Gagal mengirim notifikasi status withdrawal.', [
+                            'withdrawal_id' => $prepared['withdrawal_id'],
+                            'exception' => $notificationError->getMessage(),
+                        ]);
+                    }
+
+                    return back()->with('success', 'Xendit mengonfirmasi withdrawal telah berhasil ditransfer.');
                 }
 
-                return back()->with('success', 'Xendit mengonfirmasi withdrawal telah berhasil ditransfer.');
+                $current = WithdrawalRequest::find($prepared['withdrawal_id']);
+                if ($current?->status === 'completed') {
+                    return back()->with('success', 'Withdrawal sudah tercatat berhasil sebelumnya.');
+                }
+
+                Log::critical('Status Xendit COMPLETED tidak dapat diselaraskan dengan ledger lokal.', [
+                    'withdrawal_id' => $prepared['withdrawal_id'],
+                    'external_id' => $externalId,
+                    'local_status' => $current?->status,
+                    'provider_id' => $providerId,
+                ]);
+
+                return back()->with(
+                    'error',
+                    'Xendit menyatakan transfer berhasil, tetapi status ledger lokal bertentangan. Tidak ada perubahan saldo otomatis; lakukan rekonsiliasi keuangan.'
+                );
             }
 
             if ($existingStatus === 'FAILED') {
@@ -357,17 +381,41 @@ class WithdrawalController extends Controller
                 );
 
                 if ($failed) {
-                    $failed->user?->notify(new FinancialStatusNotification(
-                        $failed,
-                        'withdrawal',
-                        'rejected',
-                        'Transfer gagal (' . $failureCode . '). Seluruh nominal termasuk biaya admin telah dikembalikan.'
-                    ));
+                    try {
+                        $failed->user?->notify(new FinancialStatusNotification(
+                            $failed,
+                            'withdrawal',
+                            'rejected',
+                            'Transfer gagal (' . $failureCode . '). Seluruh nominal termasuk biaya admin telah dikembalikan.'
+                        ));
+                    } catch (Throwable $notificationError) {
+                        Log::warning('Gagal mengirim notifikasi refund withdrawal.', [
+                            'withdrawal_id' => $prepared['withdrawal_id'],
+                            'exception' => $notificationError->getMessage(),
+                        ]);
+                    }
+
+                    return back()->with(
+                        'error',
+                        'Xendit mengonfirmasi transfer gagal. Seluruh nominal termasuk biaya admin telah dikembalikan.'
+                    );
                 }
+
+                $current = WithdrawalRequest::find($prepared['withdrawal_id']);
+                if ($current?->status === 'rejected') {
+                    return back()->with('error', 'Withdrawal sudah ditandai gagal/ditolak sebelumnya. Tidak ada refund kedua.');
+                }
+
+                Log::critical('Status Xendit FAILED tidak dapat diselaraskan dengan ledger lokal.', [
+                    'withdrawal_id' => $prepared['withdrawal_id'],
+                    'external_id' => $externalId,
+                    'local_status' => $current?->status,
+                    'provider_id' => $providerId,
+                ]);
 
                 return back()->with(
                     'error',
-                    'Xendit mengonfirmasi transfer gagal. Seluruh nominal termasuk biaya admin telah dikembalikan.'
+                    'Xendit menyatakan transfer gagal, tetapi ledger lokal tidak dapat direfund secara otomatis. Lakukan rekonsiliasi keuangan.'
                 );
             }
 
