@@ -432,3 +432,70 @@ Jangan lakukan replace massal. Standarkan berdasarkan ENUM dan makna transaksi, 
 6. Build dan install ulang APK bila diperlukan, lalu uji submission satu kali dengan data uji.
 7. Pastikan submission tersimpan satu kali, statusnya pending, bukti analytics tersimpan, dan campaign tidak mengurangi budget sampai approval sesuai desain produk.
 8. Pertahankan branch fix/security-authentication; jangan merge ke main tanpa instruksi eksplisit.
+
+
+## 16. Pembaruan 2026-11-27 — Rekonsiliasi awal Submission #1
+
+### Hasil SQL lokal yang dilaporkan pengguna
+Database: `clipsquad_db` (MySQL lokal).
+
+Query pertama berhasil dan menghasilkan:
+- Submission ID: `1`
+- Bounty/Campaign ID: `2`
+- Clipper ID: `1`
+- `views_count`: `10000`
+- `last_paid_views`: `10000`
+- `prize_amount`: `50000.00`
+- `payout_status`: `partial`
+- `status`: `approved`
+- `approved_at`: `2026-11-27 21:07:42`
+
+Interpretasi:
+- Record submission sudah berstatus approved dan menyimpan 10.000 views serta prize Rp50.000.
+- Keberadaan nilai `approved_at` dan timestamp di atas membuktikan kolom tersebut tersedia dan terisi pada database lokal pengguna.
+- Ini belum membuktikan saldo Clipper, transaksi `bounty_prize` pada sisi Clipper/Publisher, atau pengurangan `remaining_budget` sudah konsisten. Rekonsiliasi keuangan masih terbuka.
+- Pada implementasi `SubmissionController::approve` di branch yang diperiksa, `payout_status` di-set menjadi `paid` hanya jika `remaining_budget <= 100`; selain itu di-set menjadi `partial`. Jadi nilai `partial` pada record ini tidak boleh langsung dianggap bukti bahwa reward Rp50.000 belum dibayarkan. Saat ini field tersebut lebih mencerminkan kondisi sisa budget campaign; semantik ini perlu dievaluasi dan diuji, bukan diubah tanpa persetujuan.
+
+### Query lanjutan yang gagal
+Query kedua berhenti pada error:
+`Unknown column 'budget' in 'field list'`.
+
+Penyebab: kolom `budget` tidak ada pada model Bounty di branch yang diperiksa. Model menggunakan `reward_amount` sebagai total max budget dan `remaining_budget` untuk sisa budget. Karena MySQL berhenti pada statement tersebut, query campaign, saldo user, dan transaksi yang ditulis setelahnya belum menghasilkan data.
+
+### Query read-only berikutnya
+Jalankan dari folder `E:\\Clipkeo\\clipkeo web`:
+
+```sql
+SELECT id, title, publisher_id, status, reward_amount, remaining_budget
+FROM bounties
+WHERE id = 2;
+
+SELECT id, name, role, wallet_balance
+FROM users
+WHERE id IN (1, 2);
+
+SELECT id, user_id, type, amount, status, reference_id, description, created_at
+FROM transactions
+WHERE user_id IN (1, 2)
+  AND type = 'bounty_prize'
+ORDER BY id DESC
+LIMIT 10;
+```
+
+Tujuan: cocokkan sisa budget campaign, saldo Clipper/Publisher, dan kedua sisi ledger hadiah. Jangan approve ulang Submission #1 dan jangan membuat transaksi manual.
+
+### Catatan migration
+- Database lokal terbukti memiliki kolom `approved_at` dan nilainya sudah terisi.
+- Pastikan migration yang menambahkan `approved_at` ikut tersimpan di branch/repository. Jangan menganggap kolom lokal otomatis tersedia pada instalasi baru atau server lain.
+- Migration `2026_11_27_000003_add_video_id_to_submissions_table.php` sudah ada pada branch; status eksekusi migration tersebut di database lokal tetap harus diverifikasi melalui `php artisan migrate:status`.
+
+### Status pengujian setelah pembaruan ini
+- [x] Submission #1 tersimpan dengan status approved.
+- [x] Views 10.000 dan last_paid_views 10.000 tersimpan.
+- [x] Prize amount Rp50.000 tersimpan pada record submission.
+- [x] Kolom approved_at tersedia dan terisi pada database lokal.
+- [ ] Rekonsiliasi saldo Clipper dan Publisher.
+- [ ] Rekonsiliasi transaksi bounty_prize pada kedua sisi ledger.
+- [ ] Verifikasi reward_amount dan remaining_budget Campaign #2.
+- [ ] Audit semantik payout_status partial/paid.
+- [ ] Pastikan migration approved_at tercatat dan dapat dijalankan pada database baru.
