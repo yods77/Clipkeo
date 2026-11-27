@@ -304,8 +304,8 @@ class BountyController extends Controller
             // Lock the campaign so concurrent cancellation requests cannot refund it twice.
             $bounty = Bounty::whereKey($id)->lockForUpdate()->firstOrFail();
 
-            $publisherId = $bounty->publisher_id ?? $bounty->user_id;
-            if ($publisherId !== auth()->id()) {
+            $publisherId = (int) ($bounty->publisher_id ?? $bounty->user_id);
+            if ($publisherId !== (int) auth()->id()) {
                 abort(403);
             }
 
