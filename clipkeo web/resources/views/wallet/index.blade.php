@@ -267,8 +267,14 @@
                                     }
 
                                     if ($isAdmin && $trx->type === 'platform_fee') {
-                                        $amountColor = 'text-emerald-600';
-                                        $symbol = '+';
+                                        if ($trx->status === 'success') {
+                                            $amountColor = 'text-emerald-600';
+                                            $symbol = '+';
+                                        } else {
+                                            // Pending or failed fees are not platform revenue.
+                                            $amountColor = 'text-amber-600';
+                                            $symbol = '';
+                                        }
                                     } elseif ($isAdmin && $trx->type === 'deposit') {
                                         $amountColor = 'text-blue-600';
                                         $symbol = '+';
@@ -317,17 +323,28 @@
                                             $badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
                                             break;
                                         case 'platform_fee':
-                                            if ($isAdmin) {
+                                            if ($isAdmin && $trx->status === 'success') {
                                                 $badgeLabel = 'Profit Fee';
                                                 $badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                            } elseif ($isAdmin && $trx->status === 'pending') {
+                                                $badgeLabel = 'Fee Pending';
+                                                $badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
+                                            } elseif ($isAdmin) {
+                                                $badgeLabel = 'Fee Dibatalkan';
+                                                $badgeClass = 'bg-gray-100 text-gray-600 border-gray-200';
+                                            } elseif ($trx->status === 'failed') {
+                                                $badgeLabel = 'Admin Fee Dikembalikan';
+                                                $badgeClass = 'bg-gray-100 text-gray-600 border-gray-200';
                                             } else {
                                                 $badgeLabel = 'Admin Fee';
                                                 $badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
                                             }
                                             break;
                                         case 'withdrawal':
-                                            $badgeLabel = 'Withdraw';
-                                            $badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
+                                            $badgeLabel = $trx->status === 'failed' ? 'Withdraw Gagal' : 'Withdraw';
+                                            $badgeClass = $trx->status === 'failed'
+                                                ? 'bg-gray-100 text-gray-600 border-gray-200'
+                                                : 'bg-rose-50 text-rose-700 border-rose-200';
                                             break;
                                         default:
                                             $badgeLabel = $trx->type;
