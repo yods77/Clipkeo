@@ -82,7 +82,7 @@ class WithdrawSuccessScreen extends StatelessWidget {
                     ),
                     SizedBox(height: 10.h),
                     Text(
-                      "Penarikan sebesar ${NumberFormat.currency(locale: 'id', symbol: 'Rp ', decimalDigits: 0).format(double.parse(finalAmount.toString()))} \nsedang menunggu persetujuan Admin. Dana belum dikirim ke rekening.", 
+                      "Dana bersih sebesar ${NumberFormat.currency(locale: 'id', symbol: 'Rp ', decimalDigits: 0).format(double.parse(finalAmount.toString()))} \nsedang menunggu persetujuan Admin. Dana belum dikirim ke rekening.", 
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 14.sp, color: const Color.fromARGB(255, 41, 41, 41)),
                     ),
