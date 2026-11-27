@@ -123,9 +123,9 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
         context: context,
         barrierDismissible: false,
         builder: (context) => _PinInputDialog(
-          onPinSuccess: () {
-            // Kalau PIN Benar, Panggil fungsi withdraw ASLI
-            _handleWithdraw();
+          onPinSuccess: (pin) {
+            // Server tetap memverifikasi PIN saat request withdrawal diproses.
+            _handleWithdraw(pin);
           },
         ),
       );
@@ -216,7 +216,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
   }
 
   // -- HANDLE WITHDRAW --
-  void _handleWithdraw() async {
+  void _handleWithdraw(String pin) async {
     if (selectedBankId == null) {
       _showSnackBar("Pilih bank tujuan terlebih dahulu", Colors.orange);
       return;
@@ -234,6 +234,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
     final success = await _walletService.requestWithdraw(
       amount: inputAmount,
       methodId: selectedBankId!,
+      pin: pin,
     );
     setState(() => _isSubmitting = false);
 
@@ -700,7 +701,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 // --- TARUH DI PALING BAWAH FILE (DI LUAR CLASS UTAMA) ---
 
 class _PinInputDialog extends StatefulWidget {
-  final VoidCallback onPinSuccess;
+  final ValueChanged<String> onPinSuccess;
   const _PinInputDialog({required this.onPinSuccess});
 
   @override
@@ -738,7 +739,7 @@ class _PinInputDialogState extends State<_PinInputDialog> {
       if (response.statusCode == 200) {
         if (mounted) {
           Navigator.pop(context); // Tutup Popup
-          widget.onPinSuccess(); // Lanjut Withdraw
+          widget.onPinSuccess(_pinController.text); // Lanjut Withdraw dengan PIN
         }
       } else {
         setState(() {
