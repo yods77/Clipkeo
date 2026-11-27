@@ -389,3 +389,10 @@ Jangan lakukan replace massal. Standarkan berdasarkan ENUM dan makna transaksi, 
 4. Setelah test lolos, uji di staging: request sukses, timeout setelah commit, retry dengan key sama, token renewal/logout-login, PIN salah lalu benar, key berbeda payload, saldo rendah, dan status Xendit pending/completed/failed.
 5. Backup database sebelum menjalankan migration pada environment staging/production. Jangan gunakan `migrate:fresh`.
 6. Pertahankan branch `fix/security-authentication`; jangan merge ke `main` tanpa persetujuan.
+
+
+### Follow-up setelah catatan bagian 14
+- Perubahan lanjutan sampai HEAD `9cdf2a157d3994f65b0d99a2b5cb8910b01df774` menambahkan status withdrawal aktual pada response API dan UI Flutter, termasuk tampilan berbeda untuk status rejected.
+- Flutter mempertahankan idempotency key setelah HTTP 401/422 karena pemeriksaan PIN/validasi terjadi sebelum lookup idempotency di server; hal ini mencegah retry yang sah kehilangan key setelah request sebelumnya mungkin sudah commit.
+- Catatan test Flutter mencakup token renewal untuk user ID yang sama dan retry setelah timeout. Seluruh perubahan lanjutan tetap menunggu eksekusi lokal.
+- Posisi branch saat pembaruan ini: 179 commit ahead dan 0 behind dari `main`.
