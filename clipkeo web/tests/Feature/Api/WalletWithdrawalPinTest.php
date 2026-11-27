@@ -57,7 +57,7 @@ class WalletWithdrawalPinTest extends TestCase
             'status' => 'pending',
         ]);
 
-        $withdrawal = \\App\\Models\\WithdrawalRequest::where('user_id', $user->id)->firstOrFail();
+        $withdrawal = WithdrawalRequest::where('user_id', $user->id)->firstOrFail();
 
         $this->assertDatabaseHas('transactions', [
             'user_id' => $user->id,
