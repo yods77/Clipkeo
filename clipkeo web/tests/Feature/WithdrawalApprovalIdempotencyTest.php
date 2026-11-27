@@ -21,7 +21,10 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.xendit.secret_key' => 'xnd_development_test_key']);
+        config([
+            'app.env' => 'testing',
+            'services.xendit.secret_key' => 'xnd_development_test_key',
+        ]);
         Notification::fake();
         Mail::fake();
     }
@@ -48,7 +51,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(function ($request) use ($withdrawal) {
-            return $request->hasHeader('X-IDEMPOTENCY-KEY', 'WD-' . $withdrawal->id)
+            return $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id)
                 && $request['external_id'] === 'WD-' . $withdrawal->id;
         });
 
