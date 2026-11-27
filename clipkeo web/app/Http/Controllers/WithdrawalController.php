@@ -41,7 +41,7 @@ class WithdrawalController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'amount' => 'required|numeric|min:50000',
+            'amount' => 'required|integer|min:50000',
             'payout_method_id' => 'required|exists:payout_methods,id',
             'pin' => 'required|digits:6',
         ]);
@@ -68,15 +68,15 @@ class WithdrawalController extends Controller
                 ]);
             }
 
-            $amount = round((float) $request->amount, 2);
+            $amount = (int) $request->amount;
             if ((float) $lockedUser->wallet_balance < $amount) {
                 throw ValidationException::withMessages([
                     'amount' => 'Saldo tidak cukup untuk melakukan penarikan ini.',
                 ]);
             }
 
-            $feeAmount = round($amount * 0.10, 2);
-            $finalAmount = round($amount - $feeAmount, 2);
+            $feeAmount = (int) round($amount * 0.10);
+            $finalAmount = $amount - $feeAmount;
 
             $withdrawal = WithdrawalRequest::create([
                 'user_id' => $lockedUser->id,
@@ -295,7 +295,7 @@ class WithdrawalController extends Controller
 
         if ($response->clientError()
             && !$ambiguousClientStatus
-            && $errorCode !== 'DUPLICATE_TRANSACTION_ERROR') {
+            && !str_contains(strtoupper($errorCode), 'DUPLICATE')) {
             $failed = app(WithdrawalLedgerService::class)->markFailed(
                 (int) $prepared['withdrawal_id'],
                 'Xendit: ' . $errorCode,
