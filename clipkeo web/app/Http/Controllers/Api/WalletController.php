@@ -203,11 +203,20 @@ class WalletController extends Controller
                 }
             }
 
+            $statusMessage = match ($withdrawal->status) {
+                'pending' => 'Permintaan penarikan tercatat dan menunggu persetujuan Admin.',
+                'processing' => 'Penarikan sedang diproses oleh penyedia pembayaran.',
+                'completed' => 'Penarikan telah selesai.',
+                'rejected' => 'Permintaan penarikan sebelumnya ditolak. Periksa saldo dan riwayat transaksi.',
+                default => 'Permintaan penarikan telah tercatat di server.',
+            };
+
             return response()->json([
                 'status' => 'success',
-                'message' => 'Penarikan berhasil diajukan. Dana bersih menunggu persetujuan Admin.',
+                'message' => $statusMessage,
                 'data' => [
                     'wd_id' => $withdrawal->id,
+                    'withdrawal_status' => $withdrawal->status,
                     'amount_requested' => $result['amount'],
                     'admin_fee' => $result['fee'],
                     'amount_received' => $result['final_amount'],
