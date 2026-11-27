@@ -447,8 +447,16 @@ if ($request->hasFile('analytics_file')) {
         ]);
 
     } catch (\Throwable $e) {
-        Log::error("GAGAL SUBMIT: " . $e->getMessage());
-        return response()->json(['status' => 'error', 'message' => 'Server Crash: ' . $e->getMessage()], 500);
+        Log::error('API submission failed.', [
+            'bounty_id' => $id,
+            'user_id' => $request->user()?->id,
+            'exception' => $e,
+        ]);
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Submission gagal diproses karena kesalahan server. Silakan coba kembali.',
+        ], 500);
     }
 })->middleware('auth:sanctum');
 
