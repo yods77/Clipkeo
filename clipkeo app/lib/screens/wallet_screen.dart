@@ -443,7 +443,14 @@ class _WalletScreenState extends State<WalletScreen> {
       children: transactions.asMap().entries.map((entry) {
         int index = entry.key; // Index urutan (0, 1, 2...)
         var trx = entry.value; // Data transaksi asli
-        bool isWithdraw = trx['type'] != 'reward';
+        final String transactionType = (trx['type'] ?? '').toString();
+        final String userRole = (_walletData['role'] ?? 'clipper').toString();
+        final bool isIncome = transactionType == 'deposit' ||
+            transactionType == 'bounty_refund' ||
+            transactionType == 'refund' ||
+            transactionType == 'reward' ||
+            (transactionType == 'bounty_prize' && userRole == 'clipper');
+        final bool isWithdraw = !isIncome;
         return FadeInUp(
           // 🔥 2. Bungkus dengan FadeInUp
           // 🔥 3. Atur delay berdasarkan index (makin ke bawah makin lambat munculnya)
