@@ -1,0 +1,220 @@
+# Clipkeo — Project Handoff & Status
+
+> Dokumen ini adalah catatan induk untuk melanjutkan pengembangan dan pengujian Clipkeo lintas percakapan. Perbarui bagian status, pekerjaan berikutnya, dan riwayat revisi setiap kali ada perubahan kode atau hasil pengujian baru.
+>
+> **Terakhir diperbarui:** 2026-11-27  
+> **Repository:** https://github.com/yods77/Clipkeo  
+> **Branch kerja:** `fix/security-authentication`  
+> **Aturan penting:** jangan merge ke `main` tanpa instruksi eksplisit dari pemilik proyek.
+
+---
+
+## 1. Gambaran proyek
+
+Repository merupakan monorepo yang berisi:
+- **Flutter mobile app:** folder `clipkeo app/`
+- **Laravel web/backend:** folder `clipkeo web/`
+
+Fokus pekerjaan yang tercatat dalam sesi ini adalah menstabilkan autentikasi, skema database, alur Publisher/Admin, campaign, wallet, refund, dan pembayaran hadiah Clipper.
+
+## 2. Lingkungan pengembangan lokal
+
+| Komponen | Nilai terakhir yang dilaporkan |
+|---|---|
+| OS | Windows |
+| Project lokal | `E:\\Clipkeo` |
+| Laravel folder | `E:\\Clipkeo\\clipkeo web` |
+| PHP | 8.3.37 (Laragon) |
+| MySQL | 8.4.3 |
+| Database | `clipsquad_db` |
+| DB host/port | `127.0.0.1:3306` |
+| PHP CLI | Sudah ditambahkan ke PATH; `php artisan ...` berhasil |
+
+Jangan mencatat isi `.env`, password database, password akun, PIN, token, private key, atau secret ke dokumen ini maupun Git.
+
+## 3. Aturan Git dan status sinkronisasi
+
+- Seluruh pengembangan dan pengujian dilakukan di branch `fix/security-authentication`.
+- `main` harus tetap stabil dan **tidak boleh di-merge** tanpa persetujuan eksplisit.
+- Commit terakhir yang terlihat pada terminal pengguna setelah pull pembaruan seeder adalah `dabda82` (`fix(seeder): sync all 38 Indonesian provinces`). Ini adalah **last-known commit dari terminal**, bukan jaminan HEAD saat dokumen dibaca kembali.
+- Sebelumnya pernah terlihat perubahan lokal belum di-commit pada `clipkeo app/lib/config.dart`. Periksa `git status --short` sebelum pull, reset, checkout, atau perubahan massal. Jangan menghapus perubahan lokal yang belum diperiksa.
+- Perubahan lokal pada `AdminBountyController.php` juga perlu diverifikasi status commit/push-nya: pemeriksaan lokal pengguna menunjukkan `bounty_refund` pada baris refund Admin, sedangkan salinan file branch yang diperiksa dari GitHub masih menunjukkan `refund`. Rekonsiliasi lokal vs remote adalah pekerjaan pertama saat melanjutkan.
+
+Perintah awal setiap sesi kerja:
+
+```powershell
+git branch --show-current
+git status --short
+git log -1 --oneline
+git fetch origin
+git status -sb
+```
+
+Jangan menjalankan `git reset --hard`, `git clean`, atau `git restore` pada perubahan yang belum diperiksa.
+
+## 4. Riwayat autentikasi dan perbaikan database
+
+### Google Sign-In dan Sanctum
+- Aplikasi Android berhasil di-install dan awalnya menampilkan halaman login.
+- Google Login sempat gagal dengan pesan: “Google Sign-in tidak dapat diverifikasi saat ini. Silahkan coba lagi.”
+- Log Laravel menunjukkan beberapa jenis exception, termasuk `Firebase\\JWT\\BeforeValidException` dan `Illuminate\\Database\\QueryException`.
+- Waktu perangkat HP dan laptop diperiksa dan sudah hampir sinkron.
+- Koneksi Laravel dipastikan menggunakan database `clipsquad_db`.
+- Ditemukan bahwa tabel `personal_access_tokens` belum ada di database aktif meskipun migration tercatat pending.
+- Database dibackup, kemudian migration Sanctum dijalankan secara terarah:
+  `2026_01_24_114034_create_personal_access_tokens_table.php`.
+- Setelah tabel tersedia, Google Login berhasil dan sesi login bertahan saat aplikasi dibuka kembali.
+
+### Migration dan seeder
+- Status migration diperiksa dan SQL dari migration pending ditinjau menggunakan `php artisan migrate --pretend`.
+- Backup database dibuat sebelum migration penuh.
+- Migration yang tertunda kemudian tercatat sudah berjalan, termasuk kolom reward, Xendit, email verification, security PIN, FCM token, linked account, region, dan unique reference transaksi.
+- Seeder wilayah awalnya menghasilkan 34 provinsi dan 514 kabupaten/kota.
+- Branch diperbarui dengan RegionSeeder untuk 38 provinsi. Seeder dijalankan kembali setelah backup.
+- Validasi terakhir: 38 provinsi, 514 kabupaten/kota, 0 orphan regencies, dan tidak ditemukan referensi wilayah pengguna yang invalid. Enam provinsi Papua dengan ID 91–96 telah terdaftar.
+
+### Backup yang tercatat
+- `C:\\laragon\\tmp\\clipsquad_db_20261126_234322.sql`
+- `C:\\laragon\\tmp\\clipsquad_db_before_full_migration_20261127_082508.sql`
+- `C:\\laragon\\tmp\\clipsquad_db_before_region_update_20261127_092033.sql`
+
+File backup berada di mesin lokal pengguna, bukan di repository.
+
+## 5. Pengujian aplikasi yang sudah dilakukan
+
+### Mobile app / Clipper
+- Instalasi aplikasi: berhasil.
+- Google Login: berhasil setelah migration Sanctum.
+- Dashboard: berhasil dibuka.
+- Persistensi login: berhasil; dashboard tetap terbuka tanpa login ulang.
+- Profile: informasi tampil dengan benar.
+- Wallet: saldo Rp0 dan riwayat kosong pada saat itu, sesuai karena belum ada transaksi.
+- Submissions: halaman dan tab Pending, Approved, Rejected berhasil dibuka.
+- Pull-to-refresh belum dapat divalidasi karena daftar belum memiliki data.
+- Tidak ada error atau loading tanpa akhir pada halaman Submissions.
+- Search Campaign: halaman dan kategori berhasil; daftar campaign kosong karena belum ada campaign aktif. API mengembalikan `{"status":"success","data":[],"meta":{"current_page":1,"last_page":1,"total":0}}`.
+- Filter, pencarian, hapus pencarian, dan detail campaign belum tervalidasi saat daftar kosong.
+
+### Test suite Laravel
+Perintah `php artisan test` terakhir yang dilaporkan menghasilkan:
+- **42 tests passed**
+- **125 assertions**
+- Termasuk pengujian authentication/security, wallet authorization, registration, profile, dan submission API.
+
+Hasil ini adalah baseline sebelum perbaikan transaksi berikutnya. Jalankan ulang seluruh test suite setelah perubahan kode.
+
+## 6. Akun dan data pengujian lokal
+
+Data berikut dibuat langsung di database lokal menggunakan Tinker. Ini bukan akun produksi.
+
+| Peran | User ID | Identitas |
+|---|---:|---|
+| Clipper | 1 | Akun Google yang digunakan saat login awal |
+| Publisher | 2 | `publisher-test-uxvsyaiw@example.test` |
+| Admin | 3 | `admin-test-a20ejz7u@example.test` |
+
+Password dan PIN tidak disimpan di dokumen ini. Jangan meng-commit kredensial pengujian.
+
+### Campaign uji
+- Campaign ID: 1
+- Judul: `Campaign Uji Validasi`
+- Publisher ID: 2
+- Anggaran/reward awal: Rp1.000.000
+- Status awal: `pending_review`
+- Transaksi hold: ID 1, tipe `bounty_hold`, Rp1.000.000, status `success`
+- Saldo Publisher setelah hold: Rp0
+
+Publisher berhasil membuat campaign melalui website. Validasi field wajib berjalan dan campaign berhasil disimpan. Admin berhasil login dan membuka halaman Admin.
+
+## 7. Insiden refund Admin dan hasil perbaikannya
+
+Saat Admin memilih **Tolak & Refund**, Laravel sempat gagal dengan SQLSTATE warning 1265 karena kode menyimpan tipe `refund`, sementara kolom `transactions.type` menggunakan ENUM yang tidak mengizinkannya.
+
+Definisi ENUM yang diperiksa dari database:
+
+```text
+deposit
+withdrawal
+bounty_hold
+bounty_prize
+bounty_refund
+platform_fee
+```
+
+Kode lokal pada alur refund Admin kemudian disesuaikan menjadi `bounty_refund`. Pengujian ulang berhasil:
+- Campaign ID 1 berubah menjadi `rejected`.
+- Saldo Publisher ID 2 menjadi Rp1.000.000.
+- Satu transaksi refund tercatat: transaction ID 2, tipe `bounty_refund`, nominal Rp1.000.000, status `success`.
+- Reference: `REF-ADM-1795754618-1`.
+
+**Jangan mengulangi refund campaign uji ini.** Refund telah berhasil satu kali. Hindari refund ganda.
+
+## 8. Audit tipe transaksi — pekerjaan yang masih terbuka
+
+### ENUM yang diizinkan database
+
+| Tipe | Makna |
+|---|---|
+| `deposit` | Deposit |
+| `withdrawal` | Penarikan |
+| `bounty_hold` | Dana campaign ditahan |
+| `bounty_prize` | Hadiah campaign |
+| `bounty_refund` | Pengembalian dana campaign |
+| `platform_fee` | Biaya platform |
+
+### Hasil pencarian lokal terakhir
+
+| File | Baris lokal terakhir | Nilai ditemukan | Status |
+|---|---:|---|---|
+| `AdminBountyController.php` | 106 | `bounty_refund` | Benar di salinan lokal; sinkronisasi GitHub perlu dicek |
+| `AdminBountyController.php` | 319 | `reward` | Tidak cocok ENUM |
+| `AdminBountyController.php` | 333 | `payout` | Tidak cocok ENUM |
+| `BountyController.php` | 332 | `refund` | Tidak cocok ENUM |
+| `SubmissionController.php` | 484 | `reward` | Tidak cocok ENUM |
+| `SubmissionController.php` | 496 | `payout` | Tidak cocok ENUM |
+
+Pemanggilan `deposit`, `withdrawal`, `bounty_hold`, dan `platform_fee` yang ditemukan dalam controller sudah cocok dengan ENUM.
+
+### Aturan pemetaan yang perlu diterapkan dengan hati-hati
+- `refund` diarahkan menjadi `bounty_refund`.
+- `reward` dan `payout` berhubungan dengan satu pembayaran hadiah campaign, tetapi dicatat pada dua akun berbeda: Clipper menerima uang dan Publisher mencatat biaya hadiah. Keduanya berpotensi menggunakan tipe ENUM `bounty_prize`, **namun tampilan tanda plus/minus wajib dibedakan berdasarkan pemilik transaksi/role**.
+- Jangan melakukan penggantian massal sebelum logika saldo, filter wallet, riwayat transaksi, dan pengujian diperiksa.
+
+### File wallet yang juga perlu diperbaiki
+`resources/views/wallet/index.blade.php` pada salinan branch yang diperiksa masih memakai nilai filter dan badge lama:
+- `reward`
+- `payout`
+- `refund`
+
+Perlu audit juga query filter, tampilan nominal masuk/keluar, label badge, dan tampilan transaksi Admin. Pastikan:
+- Clipper: `bounty_prize` tampil sebagai pemasukan.
+- Publisher: `bounty_prize` tampil sebagai pengeluaran.
+- Publisher: `bounty_refund` tampil sebagai pemasukan.
+- Publisher: `bounty_hold` dan `platform_fee` tampil sebagai pengeluaran.
+- Admin: arah transaksi dibedakan berdasarkan pemilik transaksi dan makna transaksi, bukan hanya nama tipe.
+
+## 9. Urutan pekerjaan berikutnya
+
+1. **Rekonsiliasi Git:** jalankan `git status --short`, `git log -1 --oneline`, dan periksa diff `AdminBountyController.php`. Pastikan perubahan lokal `bounty_refund` tidak hilang dan jangan menimpa perubahan `config.dart`.
+2. **Audit seluruh pemakaian tipe:** cari di seluruh folder aplikasi, bukan hanya `app/`; periksa controller, service, model, query wallet, Blade, API, Flutter wallet, dan test.
+3. **Perbaiki refund Publisher:** `BountyController.php` agar menggunakan `bounty_refund`.
+4. **Standarisasi hadiah:** sesuaikan pencatatan Clipper dan Publisher pada `SubmissionController.php` dan `AdminBountyController.php` dengan `bounty_prize`, setelah memastikan arah saldo dan ledger benar.
+5. **Perbaiki wallet:** filter, label, badge, warna, tanda nominal, dan query agar cocok dengan ENUM baru.
+6. **Tambah/perbarui automated tests:** refund pembatalan campaign, pembayaran hadiah normal, Admin Takeover, isolasi saldo antar pengguna, dan tampilan/filter transaksi.
+7. Jalankan `php artisan test`, lint file PHP yang berubah, lalu uji alur end-to-end dengan data pengujian baru yang tidak menyebabkan refund/payout ganda.
+8. Periksa `git diff`, commit hanya file yang relevan ke `fix/security-authentication`, dan jangan merge ke `main`.
+
+## 10. Cara melanjutkan pada percakapan baru
+
+Gunakan instruksi ini:
+
+> Lanjutkan proyek Clipkeo dari repository GitHub yods77/Clipkeo. Baca `docs/PROJECT_HANDOFF.md` pada branch `fix/security-authentication`, periksa commit terbaru dan perubahan lokal yang saya laporkan. Jangan mulai dari awal, jangan merge ke `main`, jangan menghapus perubahan lokal. Lanjutkan dari bagian “Audit tipe transaksi — pekerjaan yang masih terbuka”.
+
+Setiap kali ada revisi repository atau hasil pengujian baru:
+1. Periksa commit/diff yang berubah.
+2. Perbarui bagian status dan pekerjaan berikutnya dalam dokumen ini.
+3. Catat hasil test dan verifikasi yang benar-benar dijalankan.
+4. Catat SHA commit baru jika sudah tersedia.
+5. Jangan mencatat password, PIN, token, atau secret.
+
+**Catatan pembaruan:** dokumen ini tidak otomatis mengetahui hasil pengujian manual di komputer pengguna. Riwayat commit GitHub dapat diperiksa setiap sesi, sedangkan hasil uji lokal perlu dilaporkan pengguna atau disimpan dalam catatan ini setelah diverifikasi.
