@@ -18,11 +18,13 @@ class WithdrawalRequestResult {
   final WithdrawalRequestStatus status;
   final String message;
   final int? withdrawalId;
+  final String? withdrawalStatus;
 
   const WithdrawalRequestResult({
     required this.status,
     required this.message,
     this.withdrawalId,
+    this.withdrawalStatus,
   });
 
   bool get isSuccess => status == WithdrawalRequestStatus.success;
@@ -321,6 +323,8 @@ class WalletService {
           withdrawalId: int.tryParse(
             responseData['data']?['wd_id']?.toString() ?? '',
           ),
+          withdrawalStatus:
+              responseData['data']?['withdrawal_status']?.toString(),
         );
       }
 
