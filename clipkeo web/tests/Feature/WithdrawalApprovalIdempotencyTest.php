@@ -246,7 +246,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
                 return Http::response([], 200);
             }
 
-            throw new \\RuntimeException('Existing simple-reference payout must not be sent again.');
+            throw new \RuntimeException('Existing simple-reference payout must not be sent again.');
         });
 
         $this->actingAs($admin)
