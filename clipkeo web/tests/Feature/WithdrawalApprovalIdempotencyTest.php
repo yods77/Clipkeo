@@ -227,6 +227,41 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
         });
     }
 
+    public function test_processing_withdrawal_checks_the_older_simple_external_id_before_retrying(): void
+    {
+        [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
+        $withdrawal->update(['status' => 'processing']);
+        $simpleExternalId = 'WD-' . $withdrawal->id;
+
+        Http::fake(function ($request) use ($simpleExternalId) {
+            if ($request->method() === 'GET') {
+                if ($request['external_id'] === $simpleExternalId) {
+                    return Http::response([[
+                        'id' => 'older-simple-xendit-disbursement',
+                        'external_id' => $simpleExternalId,
+                        'status' => 'PENDING',
+                    ]], 200);
+                }
+
+                return Http::response([], 200);
+            }
+
+            throw new \\RuntimeException('Existing simple-reference payout must not be sent again.');
+        });
+
+        $this->actingAs($admin)
+            ->post(route('admin.withdrawals.approve', $withdrawal->id))
+            ->assertRedirect();
+
+        $this->assertSame($simpleExternalId, $transaction->fresh()->reference_id);
+        $this->assertSame('older-simple-xendit-disbursement', $transaction->fresh()->external_ref);
+        Http::assertSentCount(2);
+        Http::assertSent(function ($request) use ($simpleExternalId) {
+            return $request->method() === 'GET'
+                && $request['external_id'] === $simpleExternalId;
+        });
+    }
+
     public function test_processing_legacy_withdrawal_without_ledger_is_held_for_manual_reconciliation(): void
     {
         [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
