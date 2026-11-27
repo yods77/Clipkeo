@@ -214,132 +214,132 @@ class WithdrawalController extends Controller
             'description' => 'Withdrawal Clipkeo',
         ];
 
-            try {
-                $lookupResponse = Http::withBasicAuth($secretKey, '')
-                    ->timeout(15)
-                    ->get('https://api.xendit.co/disbursements', [
-                        'external_id' => $externalId,
-                    ]);
-            } catch (Throwable $e) {
-                Log::warning('Tidak dapat memeriksa status withdrawal di Xendit.', [
-                    'withdrawal_id' => $prepared['withdrawal_id'],
+        try {
+            $lookupResponse = Http::withBasicAuth($secretKey, '')
+                ->timeout(15)
+                ->get('https://api.xendit.co/disbursements', [
                     'external_id' => $externalId,
-                    'exception' => $e->getMessage(),
                 ]);
+        } catch (Throwable $e) {
+            Log::warning('Tidak dapat memeriksa status withdrawal di Xendit.', [
+                'withdrawal_id' => $prepared['withdrawal_id'],
+                'external_id' => $externalId,
+                'exception' => $e->getMessage(),
+            ]);
 
-                return back()->with(
-                    'error',
-                    'Status transfer belum dapat diverifikasi ke Xendit. Tidak ada transfer baru yang dikirim. Periksa izin Money-out Read lalu coba lagi.'
-                );
-            }
+            return back()->with(
+                'error',
+                'Status transfer belum dapat diverifikasi ke Xendit. Tidak ada transfer baru yang dikirim. Periksa izin Money-out Read lalu coba lagi.'
+            );
+        }
 
-            if ($lookupResponse->status() === 404) {
-                $existingDisbursements = [];
-            } elseif ($lookupResponse->successful()) {
-                $existingDisbursements = $lookupResponse->json();
-            } else {
-                Log::warning('Xendit menolak pemeriksaan status withdrawal.', [
-                    'withdrawal_id' => $prepared['withdrawal_id'],
-                    'external_id' => $externalId,
-                    'http_status' => $lookupResponse->status(),
-                ]);
+        if ($lookupResponse->status() === 404) {
+            $existingDisbursements = [];
+        } elseif ($lookupResponse->successful()) {
+            $existingDisbursements = $lookupResponse->json();
+        } else {
+            Log::warning('Xendit menolak pemeriksaan status withdrawal.', [
+                'withdrawal_id' => $prepared['withdrawal_id'],
+                'external_id' => $externalId,
+                'http_status' => $lookupResponse->status(),
+            ]);
 
-                return back()->with(
-                    'error',
-                    'Clipkeo belum dapat memverifikasi status transfer. Pastikan API key Xendit memiliki izin Money-out Read dan Money-out Write.'
-                );
-            }
+            return back()->with(
+                'error',
+                'Clipkeo belum dapat memverifikasi status transfer. Pastikan API key Xendit memiliki izin Money-out Read dan Money-out Write.'
+            );
+        }
 
-            if (!is_array($existingDisbursements)) {
-                return back()->with(
-                    'error',
-                    'Format status dari Xendit tidak dikenali. Withdrawal tetap diproses dan tidak dikirim ulang.'
-                );
-            }
+        if (!is_array($existingDisbursements)) {
+            return back()->with(
+                'error',
+                'Format status dari Xendit tidak dikenali. Withdrawal tetap diproses dan tidak dikirim ulang.'
+            );
+        }
 
-            $matchingDisbursements = array_values(array_filter(
-                $existingDisbursements,
-                fn ($item) => is_array($item)
-                    && ($item['external_id'] ?? null) === $externalId
-            ));
+        $matchingDisbursements = array_values(array_filter(
+            $existingDisbursements,
+            fn ($item) => is_array($item)
+                && ($item['external_id'] ?? null) === $externalId
+        ));
 
-            if (count($matchingDisbursements) > 1) {
-                Log::critical('Ditemukan lebih dari satu disbursement untuk satu withdrawal.', [
-                    'withdrawal_id' => $prepared['withdrawal_id'],
-                    'external_id' => $externalId,
-                    'disbursement_ids' => array_column($matchingDisbursements, 'id'),
-                ]);
+        if (count($matchingDisbursements) > 1) {
+            Log::critical('Ditemukan lebih dari satu disbursement untuk satu withdrawal.', [
+                'withdrawal_id' => $prepared['withdrawal_id'],
+                'external_id' => $externalId,
+                'disbursement_ids' => array_column($matchingDisbursements, 'id'),
+            ]);
 
-                return back()->with(
-                    'error',
-                    'Ditemukan beberapa catatan transfer di Xendit. Withdrawal ditahan untuk rekonsiliasi Admin; jangan kirim ulang.'
-                );
-            }
+            return back()->with(
+                'error',
+                'Ditemukan beberapa catatan transfer di Xendit. Withdrawal ditahan untuk rekonsiliasi Admin; jangan kirim ulang.'
+            );
+        }
 
-            if (count($matchingDisbursements) === 1) {
-                $existing = $matchingDisbursements[0];
-                $providerId = isset($existing['id']) ? (string) $existing['id'] : null;
-                $existingStatus = strtoupper((string) ($existing['status'] ?? 'UNKNOWN'));
+        if (count($matchingDisbursements) === 1) {
+            $existing = $matchingDisbursements[0];
+            $providerId = isset($existing['id']) ? (string) $existing['id'] : null;
+            $existingStatus = strtoupper((string) ($existing['status'] ?? 'UNKNOWN'));
 
-                $this->storeProviderReference(
-                    $prepared,
+            $this->storeProviderReference(
+                $prepared,
+                $externalId,
+                $providerId,
+                $bankCode,
+                $accountNumber
+            );
+
+            if ($existingStatus === 'COMPLETED') {
+                $settled = app(WithdrawalLedgerService::class)->markCompleted(
+                    (int) $prepared['withdrawal_id'],
                     $externalId,
-                    $providerId,
-                    $bankCode,
-                    $accountNumber
+                    $providerId
                 );
 
-                if ($existingStatus === 'COMPLETED') {
-                    $settled = app(WithdrawalLedgerService::class)->markCompleted(
-                        (int) $prepared['withdrawal_id'],
-                        $externalId,
-                        $providerId
-                    );
-
-                    if ($settled) {
-                        $settled->user?->notify(
-                            new FinancialStatusNotification($settled, 'withdrawal', 'success')
-                        );
-                    }
-
-                    return back()->with('success', 'Xendit mengonfirmasi withdrawal telah berhasil ditransfer.');
-                }
-
-                if ($existingStatus === 'FAILED') {
-                    $failureCode = (string) ($existing['failure_code'] ?? 'BANK_ERROR');
-                    $failed = app(WithdrawalLedgerService::class)->markFailed(
-                        (int) $prepared['withdrawal_id'],
-                        'Bank Error: ' . $failureCode,
-                        $externalId
-                    );
-
-                    if ($failed) {
-                        $failed->user?->notify(new FinancialStatusNotification(
-                            $failed,
-                            'withdrawal',
-                            'rejected',
-                            'Transfer gagal (' . $failureCode . '). Seluruh nominal termasuk biaya admin telah dikembalikan.'
-                        ));
-                    }
-
-                    return back()->with(
-                        'error',
-                        'Xendit mengonfirmasi transfer gagal. Seluruh nominal termasuk biaya admin telah dikembalikan.'
+                if ($settled) {
+                    $settled->user?->notify(
+                        new FinancialStatusNotification($settled, 'withdrawal', 'success')
                     );
                 }
 
-                if ($existingStatus === 'PENDING') {
-                    return back()->with(
-                        'success',
-                        'Transfer sudah ditemukan di Xendit dan masih pending. Menunggu konfirmasi bank; tidak ada transfer baru.'
-                    );
+                return back()->with('success', 'Xendit mengonfirmasi withdrawal telah berhasil ditransfer.');
+            }
+
+            if ($existingStatus === 'FAILED') {
+                $failureCode = (string) ($existing['failure_code'] ?? 'BANK_ERROR');
+                $failed = app(WithdrawalLedgerService::class)->markFailed(
+                    (int) $prepared['withdrawal_id'],
+                    'Bank Error: ' . $failureCode,
+                    $externalId
+                );
+
+                if ($failed) {
+                    $failed->user?->notify(new FinancialStatusNotification(
+                        $failed,
+                        'withdrawal',
+                        'rejected',
+                        'Transfer gagal (' . $failureCode . '). Seluruh nominal termasuk biaya admin telah dikembalikan.'
+                    ));
                 }
 
                 return back()->with(
                     'error',
-                    'Xendit mengembalikan status transfer yang belum dikenali. Withdrawal ditahan untuk pemeriksaan.'
+                    'Xendit mengonfirmasi transfer gagal. Seluruh nominal termasuk biaya admin telah dikembalikan.'
                 );
             }
+
+            if ($existingStatus === 'PENDING') {
+                return back()->with(
+                    'success',
+                    'Transfer sudah ditemukan di Xendit dan masih pending. Menunggu konfirmasi bank; tidak ada transfer baru.'
+                );
+            }
+
+            return back()->with(
+                'error',
+                'Xendit mengembalikan status transfer yang belum dikenali. Withdrawal ditahan untuk pemeriksaan.'
+            );
+        }
 
         try {
             // X-IDEMPOTENCY-KEY and external_id remain stable across retries.
