@@ -32,6 +32,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
   // -- STATE VARIABLES --
   List<dynamic> payoutMethods = []; // 🔥 Deklarasikan ini
   bool _isSubmitting = false;
+  bool _hasPendingWithdrawalAttempt = false;
   final WalletService _walletService = WalletService();
   String inputAmount = "0";
   List<dynamic>? _localBankList;
@@ -160,12 +161,20 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 
     try {
       List<dynamic> freshData = await _walletService.getPayoutMethods();
+      final pendingAttempt =
+          await _walletService.getPendingWithdrawalAttempt();
 
       if (mounted) {
         setState(() {
-          _localBankList = freshData; // Isi data (Skeleton hilang otomatis)
+          _localBankList = freshData;
 
-          if (freshData.isNotEmpty) {
+          if (pendingAttempt != null) {
+            _hasPendingWithdrawalAttempt = true;
+            inputAmount = pendingAttempt['amount']?.toString() ?? '0';
+            selectedBankId = int.tryParse(
+              pendingAttempt['payout_method_id']?.toString() ?? '',
+            );
+          } else if (freshData.isNotEmpty) {
             selectedBankId = int.tryParse(freshData[0]['id'].toString());
           }
         });
@@ -198,6 +207,14 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 
   // -- INPUT KEYPAD --
   void onKeyTap(String value) {
+    if (_hasPendingWithdrawalAttempt) {
+      _showSnackBar(
+        "Selesaikan pemeriksaan penarikan sebelumnya dengan nominal dan rekening yang sama terlebih dahulu.",
+        Colors.orange,
+      );
+      return;
+    }
+
     setState(() {
       if (inputAmount == "0")
         inputAmount = value == "00" ? "0" : value;
@@ -207,6 +224,14 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
   }
 
   void onBackspace() {
+    if (_hasPendingWithdrawalAttempt) {
+      _showSnackBar(
+        "Nominal dikunci sampai status penarikan sebelumnya terkonfirmasi.",
+        Colors.orange,
+      );
+      return;
+    }
+
     setState(() {
       if (inputAmount.length > 1)
         inputAmount = inputAmount.substring(0, inputAmount.length - 1);
@@ -217,6 +242,8 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 
   // -- HANDLE WITHDRAW --
   void _handleWithdraw(String pin) async {
+    if (_isSubmitting) return;
+
     if (selectedBankId == null) {
       _showSnackBar("Pilih bank tujuan terlebih dahulu", Colors.orange);
       return;
@@ -231,16 +258,21 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
     }
 
     setState(() => _isSubmitting = true);
-    final success = await _walletService.requestWithdraw(
+    final result = await _walletService.requestWithdraw(
       amount: inputAmount,
       methodId: selectedBankId!,
       pin: pin,
     );
 
     if (!mounted) return;
-    setState(() => _isSubmitting = false);
+    setState(() {
+      _isSubmitting = false;
+      _hasPendingWithdrawalAttempt =
+          result.status == WithdrawalRequestStatus.uncertain ||
+          result.status == WithdrawalRequestStatus.pendingRequestMismatch;
+    });
 
-    if (success) {
+    if (result.isSuccess) {
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -252,7 +284,13 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
         ),
       );
     } else {
-      _showSnackBar("Gagal memproses, coba lagi nanti", Colors.red);
+      final isUncertain =
+          result.status == WithdrawalRequestStatus.uncertain ||
+          result.status == WithdrawalRequestStatus.pendingRequestMismatch;
+      _showSnackBar(
+        result.message,
+        isUncertain ? Colors.orange : Colors.red,
+      );
     }
   }
 
