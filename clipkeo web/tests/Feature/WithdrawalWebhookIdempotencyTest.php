@@ -28,9 +28,16 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
         $this->sendWebhook($externalId, 'FAILED')
             ->assertOk();
 
-        $this->assertSame(95000.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame(100000.0, (float) $user->fresh()->wallet_balance);
         $this->assertSame('failed', $transaction->fresh()->status);
         $this->assertSame('rejected', $withdrawal->fresh()->status);
+        $this->assertSame('failed', Transaction::where('reference_id', 'FEE-WD-' . $withdrawal->id)->value('status'));
+        $this->assertDatabaseHas('transactions', [
+            'reference_id' => 'WRF-WD-' . $withdrawal->id,
+            'type' => Transaction::TYPE_WITHDRAWAL_REFUND,
+            'amount' => 50000,
+            'status' => 'success',
+        ]);
 
         $this->sendWebhook($externalId, 'FAILED')
             ->assertOk();
@@ -38,7 +45,7 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
         $this->sendWebhook($externalId, 'COMPLETED')
             ->assertOk();
 
-        $this->assertSame(95000.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame(100000.0, (float) $user->fresh()->wallet_balance);
         $this->assertSame('failed', $transaction->fresh()->status);
         $this->assertSame('rejected', $withdrawal->fresh()->status);
     }
@@ -50,14 +57,14 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
         $this->sendWebhook($externalId, 'COMPLETED')
             ->assertOk();
 
-        $this->assertSame(50000.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame(0.0, (float) $user->fresh()->wallet_balance);
         $this->assertSame('success', $transaction->fresh()->status);
         $this->assertSame('completed', $withdrawal->fresh()->status);
 
         $this->sendWebhook($externalId, 'FAILED')
             ->assertOk();
 
-        $this->assertSame(50000.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame(0.0, (float) $user->fresh()->wallet_balance);
         $this->assertSame('success', $transaction->fresh()->status);
         $this->assertSame('completed', $withdrawal->fresh()->status);
     }
@@ -79,20 +86,32 @@ class WithdrawalWebhookIdempotencyTest extends TestCase
             'user_id' => $user->id,
             'amount_requested' => 50000,
             'amount_final' => 45000,
+            'admin_fee' => 5000,
             'payout_method_id' => $payoutMethod->id,
             'status' => 'processing',
             'bank_info' => 'Bank Test (1234567890) a/n Test Account',
         ]);
 
-        $externalId = 'WD-' . now()->format('Ymd') . '-' . $withdrawal->id;
+        $externalId = 'WD-' . $withdrawal->id;
 
         $transaction = Transaction::create([
             'user_id' => $user->id,
             'type' => Transaction::TYPE_WITHDRAWAL,
+            'withdrawal_request_id' => $withdrawal->id,
             'amount' => 45000,
             'currency' => 'IDR',
             'description' => 'Penarikan sedang diproses',
             'reference_id' => $externalId,
+            'status' => 'pending',
+        ]);
+
+        Transaction::create([
+            'user_id' => $user->id,
+            'type' => Transaction::TYPE_PLATFORM_FEE,
+            'amount' => 5000,
+            'currency' => 'IDR',
+            'description' => 'Biaya admin withdrawal (10%)',
+            'reference_id' => 'FEE-WD-' . $withdrawal->id,
             'status' => 'pending',
         ]);
 
