@@ -4,6 +4,7 @@ namespace Tests\Feature\Api;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -104,11 +105,18 @@ class WalletWithdrawalIdempotencyTest extends TestCase
         $firstHeaders['Idempotency-Key'] = $key;
         $secondHeaders['Idempotency-Key'] = $key;
 
+        $this->assertNotSame($firstUser->id, $secondUser->id);
+
         $firstResponse = $this->postJson('/api/wallet/withdraw', [
             'amount' => 50000,
             'payout_method_id' => $firstPayoutMethod->id,
             'pin' => '123456',
         ], $firstHeaders)->assertOk();
+
+        // Feature tests reuse the same application container for multiple
+        // requests. Forget cached guards so the next bearer token is resolved
+        // as the second account, just as it would be in a separate HTTP request.
+        Auth::forgetGuards();
 
         $secondResponse = $this->postJson('/api/wallet/withdraw', [
             'amount' => 50000,
