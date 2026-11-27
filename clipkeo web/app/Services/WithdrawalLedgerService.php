@@ -65,7 +65,9 @@ class WithdrawalLedgerService
                 ->lockForUpdate()
                 ->first();
 
-            if (!$withdrawal || in_array($withdrawal->status, ['completed', 'rejected'], true)) {
+            if (!$withdrawal
+                || in_array($withdrawal->status, ['completed', 'rejected'], true)
+                || (!$allowProcessing && $withdrawal->status !== 'pending')) {
                 return null;
             }
 
@@ -112,9 +114,9 @@ class WithdrawalLedgerService
     /**
      * Refund the full gross amount, including the 10% fee, exactly once.
      */
-    public function markFailed(int $withdrawalId, string $reason, ?string $externalId = null): ?WithdrawalRequest
+    public function markFailed(int $withdrawalId, string $reason, ?string $externalId = null, bool $allowProcessing = true): ?WithdrawalRequest
     {
-        return DB::transaction(function () use ($withdrawalId, $reason, $externalId) {
+        return DB::transaction(function () use ($withdrawalId, $reason, $externalId, $allowProcessing) {
             $withdrawal = WithdrawalRequest::whereKey($withdrawalId)
                 ->lockForUpdate()
                 ->first();
