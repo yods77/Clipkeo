@@ -71,7 +71,11 @@ Route::get('/', function () {
         ->get();
 
     $bounties = \App\Models\Bounty::where('status', 'active')->latest()->take(6)->get();
-    $totalPayout = \App\Models\Transaction::where('type', 'payout')->sum('amount');
+    $totalPayout = \App\Models\Transaction::where('type', \App\Models\Transaction::TYPE_BOUNTY_PRIZE)
+        ->whereHas('user', function ($q) {
+            $q->where('role', 'clipper');
+        })
+        ->sum('amount');
     $totalClipper = \App\Models\User::where('role', 'clipper')->count();
     $activeBounties = \App\Models\Bounty::where('status', 'active')->count();
     $topPrizePool = \App\Models\Bounty::where('status', 'active')->sum('reward_amount');
