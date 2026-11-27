@@ -66,16 +66,22 @@ class WalletService {
         '${hex.substring(20, 32)}';
   }
 
-  String _pendingStorageKeyFor(Map<String, String> headers) {
+  String _pendingStorageKeyFor(
+    Map<String, String> headers, {
+    String? userId,
+  }) {
     final authorization = headers['Authorization'];
     if (authorization == null || authorization.isEmpty) {
       throw StateError('Authenticated user is required for pending withdrawal state.');
     }
 
-    // Scope local retry state to the authenticated account without storing
-    // the bearer token a second time in the preference key.
-    final fingerprint = sha256.convert(utf8.encode(authorization)).toString();
-    return '$_pendingWithdrawalStorageKeyPrefix$fingerprint';
+    // Prefer the stable account ID so the pending key survives token renewal
+    // and logout/login. Fall back to a token fingerprint for legacy sessions.
+    final accountIdentity = userId != null && userId.trim().isNotEmpty
+        ? 'user_$userId'
+        : sha256.convert(utf8.encode(authorization)).toString();
+
+    return '$_pendingWithdrawalStorageKeyPrefix$accountIdentity';
   }
 
   Future<Map<String, dynamic>?> _readPendingWithdrawalAttempt(
@@ -101,7 +107,13 @@ class WalletService {
     final headers = await _getHeaders();
     if (!headers.containsKey('Authorization')) return null;
 
-    return _readPendingWithdrawalAttempt(_pendingStorageKeyFor(headers));
+    final prefs = await SharedPreferences.getInstance();
+    final storageKey = _pendingStorageKeyFor(
+      headers,
+      userId: prefs.getString('user_id'),
+    );
+
+    return _readPendingWithdrawalAttempt(storageKey);
   }
 
   Future<void> _clearPendingWithdrawalAttempt(String storageKey) async {
@@ -208,7 +220,10 @@ class WalletService {
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final pendingStorageKey = _pendingStorageKeyFor(headers);
+    final pendingStorageKey = _pendingStorageKeyFor(
+      headers,
+      userId: prefs.getString('user_id'),
+    );
     Map<String, dynamic>? pending;
 
     try {
