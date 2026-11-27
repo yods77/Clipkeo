@@ -75,7 +75,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
 
             return Http::response([
                 'id' => 'xendit-disbursement-after-retry',
-                'external_id' => 'WD-' . $request['external_id'],
+                'external_id' => $request['external_id'],
                 'status' => 'PENDING',
             ], 200);
         });
