@@ -48,8 +48,12 @@ class WebhookController extends Controller
 
         // [LANGKAH 2] Ambil Data Transaksi
         $data = $request->all();
-        $externalId = $data['external_id'] ?? ''; 
+        $externalId = $data['external_id'] ?? '';
         $status = $data['status'] ?? '';
+
+        if (!is_string($externalId) || $externalId === '' || !is_string($status)) {
+            return response()->json(['message' => 'Invalid webhook payload'], 200);
+        }
 
         // Log untuk monitoring di storage/logs/laravel.log
         Log::info('Webhook Xendit Masuk:', ['id' => $externalId, 'status' => $status]);
