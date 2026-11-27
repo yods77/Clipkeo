@@ -36,7 +36,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
         Http::fake([
             'https://api.xendit.co/disbursements' => Http::response([
                 'id' => 'xendit-disbursement-123',
-                'external_id' => 'WD-' . $withdrawal->id,
+                'external_id' => 'WD-testing-' . $withdrawal->id,
                 'status' => 'PENDING',
             ], 200),
         ]);
@@ -52,7 +52,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
         Http::assertSentCount(1);
         Http::assertSent(function ($request) use ($withdrawal) {
             return $request->hasHeader('X-IDEMPOTENCY-KEY', 'clipkeo-testing-wd-' . $withdrawal->id)
-                && $request['external_id'] === 'WD-' . $withdrawal->id;
+                && $request['external_id'] === 'WD-testing-' . $withdrawal->id;
         });
 
         // A second admin click must not create another transfer after Xendit
@@ -68,7 +68,7 @@ class WithdrawalApprovalIdempotencyTest extends TestCase
     {
         [$admin, $withdrawal, $transaction] = $this->createWithdrawal();
         $postAttempts = 0;
-        $externalId = 'WD-' . $withdrawal->id;
+        $externalId = 'WD-testing-' . $withdrawal->id;
 
         Http::fake(function ($request) use (&$postAttempts, $externalId) {
             if ($request->method() === 'GET') {
