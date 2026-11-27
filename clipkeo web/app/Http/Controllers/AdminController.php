@@ -46,12 +46,22 @@ class AdminController extends Controller
 
         // --- 3. DATA CHART (VERSI PHP - ANTI GAGAL) ---
         // Kita ambil data mentahnya saja, lalu hitung pakai logika PHP
-        $allTransactions = Transaction::select('type', 'amount')->get();
+        $allTransactions = Transaction::with('user')
+            ->get(['id', 'user_id', 'type', 'amount']);
 
-        // Grouping berdasarkan 'type' dan jumlahkan 'amount' (absolute)
-        $groupedData = $allTransactions->groupBy('type')->map(function ($row) {
+        // Prize dicatat pada dua ledger: pemasukan Clipper dan pengeluaran Publisher.
+        // Pisahkan keduanya agar chart Admin tidak menyatukan makna transaksi.
+        $groupedData = $allTransactions->groupBy(function ($item) {
+            if ($item->type === Transaction::TYPE_BOUNTY_PRIZE) {
+                return $item->user?->role === 'publisher'
+                    ? 'bounty_prize_publisher'
+                    : 'bounty_prize_clipper';
+            }
+
+            return $item->type;
+        })->map(function ($row) {
             return $row->sum(function ($item) {
-                return abs($item->amount); // Paksa jadi positif biar chart muncul
+                return abs($item->amount);
             });
         });
 
@@ -64,7 +74,11 @@ class AdminController extends Controller
 
         // Rapikan tulisan Label
         $chartLabels = array_map(function ($label) {
-            return ucwords(str_replace('_', ' ', $label));
+            return match ($label) {
+                'bounty_prize_clipper' => 'Hadiah Clipper',
+                'bounty_prize_publisher' => 'Pembayaran Hadiah Publisher',
+                default => ucwords(str_replace('_', ' ', $label)),
+            };
         }, $rawLabels);
 
         // Ambil data pesan terbaru
