@@ -37,7 +37,7 @@ class WalletWithdrawalIdempotencyTest extends TestCase
         $headers['Idempotency-Key'] = '22222222-2222-4222-8222-222222222222';
 
         $payload = [
-            'amount' => 50000,
+            'amount' => 80000,
             'payout_method_id' => $payoutMethod->id,
             'pin' => '123456',
         ];
@@ -55,7 +55,7 @@ class WalletWithdrawalIdempotencyTest extends TestCase
 
         $this->assertDatabaseCount('withdrawal_requests', 1);
         $this->assertDatabaseCount('transactions', 2);
-        $this->assertSame(50000.0, (float) $user->fresh()->wallet_balance);
+        $this->assertSame(20000.0, (float) $user->fresh()->wallet_balance);
     }
 
     public function test_reusing_a_key_with_different_withdrawal_details_is_rejected(): void
