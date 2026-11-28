@@ -804,3 +804,14 @@ Kesimpulan: callback Xendit untuk `WD-local-2` diproses oleh Laravel dan withdra
 - [ ] Periksa riwayat transaksi dan notifikasi pada aplikasi Android serta website.
 
 Kesimpulan sementara: pencatatan withdrawal dan biaya admin sudah konsisten di database. Keberadaan serta keterlihatan notifikasi pada sisi pengguna belum diverifikasi; struktur tabel bukan bukti bahwa notifikasi sudah dibuat atau ditampilkan.
+
+
+### 28 Nov 2026 — Notifikasi withdrawal berhasil tercatat di database
+- [x] Tabel `notifications` memuat notifikasi terbaru `FinancialStatusNotification` untuk user/clipper #1 dengan `type=withdrawal`, `status=success`, judul `Penarikan Dana Berhasil`, dan pesan bahwa Rp45.000 berhasil dikirim.
+- [x] Data notifikasi mencantumkan nominal `45000.00`, ikon `check-circle`, warna `green`, dan waktu dibuat 2026-11-28 09:45:55; `read_at` masih NULL sehingga notifikasi belum dibaca.
+- [x] Notifikasi withdrawal sebelumnya berstatus `pending` untuk Rp45.000 juga ada, dibuat 08:55:19.
+- [x] Riwayat transaksi user #1 memuat withdrawal Rp45.000 `success` (WD-local-2) dan platform fee Rp5.000 `success` (FEE-WD-2), masing-masing satu baris.
+- [ ] Verifikasi notifikasi sukses dan riwayat transaksi tampil di aplikasi Android dan website clipper.
+- [ ] Periksa URL pada data notifikasi sukses: tersimpan sebagai `http://moiest-smothered-miriam.ngrok-free.dev/wallet`, sedangkan hostname tunnel aktif yang dipakai pada pengujian publik adalah `moiest-smotheredly-miriam.ngrok-free.dev` dengan HTTPS. Kemungkinan URL notifikasi tidak sesuai host/protokol tunnel; uji klik dengan hati-hati dan jangan menganggap URL itu valid. Tentukan konfigurasi URL publik yang benar setelah pengujian UI.
+
+Kesimpulan: data notifikasi keberhasilan sudah dibuat di database, tetapi tampilan pada perangkat/web dan URL aksi notifikasi masih perlu diuji. Jangan mengubah status finansial atau membuat withdrawal baru.
