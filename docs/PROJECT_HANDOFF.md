@@ -711,3 +711,9 @@ curl.exe -i -X POST "https://moist-smothered-miriam.ngrok-free.dev/webhooks/xend
 ```
 
 Langkah berikut: catat output uji; bila HTTP 401 JSON, endpoint sudah mencapai Laravel. Selanjutnya perbarui callback URL di dashboard Xendit ke `https://moist-smothered-miriam.ngrok-free.dev/webhooks/xendit`, pastikan verification token sesuai tanpa membagikan nilainya, lalu resend callback untuk disbursement `WD-local-2` yang sudah COMPLETED. Jangan membuat payout baru atau mengubah saldo/ledger manual.
+
+
+### 28 Nov 2026 — Hasil uji pertama endpoint melalui ngrok
+Pada 28 Nov 2026 pengguna menjalankan POST ke `https://moist-smothered-miriam.ngrok-free.dev/webhooks/xendit` dengan body `{}`. Respons: HTTP 404 HTML dengan header `Ngrok-Error-Code: ERR_NGROK_3200` dan halaman menyatakan endpoint offline. Ini adalah respons dari ngrok, bukan HTTP 404 dari Laravel; request belum mencapai aplikasi, sehingga pengujian route dan callback-token belum terjadi. Screenshot sebelumnya menunjukkan tunnel online, tetapi pada saat pengujian endpoint sudah offline (kemungkinan proses ngrok berhenti atau alamat tidak lagi aktif).
+
+Tindakan berikutnya: (1) pastikan Laravel berjalan di `http://127.0.0.1:8000` dengan `php artisan serve --host=0.0.0.0 --port=8000`; (2) di terminal kedua jalankan `ngrok http 8000` dan biarkan tetap terbuka; (3) gunakan hostname HTTPS yang tercetak pada sesi ngrok aktif, jangan mengasumsikan hostname lama; (4) uji lokal `POST http://127.0.0.1:8000/webhooks/xendit` tanpa callback token dan harapkan HTTP 401 JSON dari Laravel; (5) ulangi POST yang sama ke hostname ngrok yang sedang aktif dan harapkan HTTP 401 JSON. Jangan resend callback Xendit atau membuat payout baru sebelum endpoint terverifikasi. Jangan membagikan callback token atau kredensial.
