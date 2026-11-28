@@ -5,6 +5,7 @@
 > **Tanggal baseline:** 2026-11-27  
 > **Repository:** https://github.com/yods77/Clipkeo  
 > **Branch acuan:** `fix/security-authentication`  
+> **Pembaruan terakhir:** 2026-11-28 — commit branch `7d31dd4`  
 > **Baseline kode yang ditinjau:** commit `36d668e84a32b77adaf129e1d4dfa58150d39175`  
 > **Penting:** item roadmap adalah rekomendasi/temuan audit, bukan klaim bahwa fitur sudah tersedia atau sudah diuji. Verifikasi ulang kode dan perilaku aktual sebelum implementasi.
 
@@ -626,3 +627,48 @@ Catatan: bukti saat ini berasal dari query transaksi user #4 yang menampilkan en
 - [ ] Tambahkan server-side authorization `role === publisher` pada halaman dan proses deposit (serta endpoint terkait bila ada), kemudian buat feature test: Publisher boleh membuka/membuat deposit; Clipper menerima HTTP 403 dan tidak ada invoice/transaction deposit yang dibuat.
 - [ ] Untuk tes withdrawal Clipper Takeover Test, jangan minta akun Clipper deposit. Gunakan saldo reward campaign yang dibayarkan melalui alur Publisher → campaign → submission approval. Setelah reward masuk, baru uji withdrawal Xendit Test Mode.
 - [ ] Jangan edit wallet balance/ledger manual dan jangan melakukan deposit memakai akun Clipper.
+
+## 15. Progress Update — 2026-11-28: Admin Deposit Notifications & Campaign Image Delivery
+
+Bagian ini mencatat hasil yang sudah dikonfirmasi pengguna setelah progress tracker dan catatan Xendit sebelumnya. Status [x] berarti ada hasil pengujian atau konfirmasi pengguna; status [ ] tetap terbuka.
+
+### A. Deposit Publisher dan notifikasi Admin
+- [x] Fitur notifikasi deposit Admin dari branch `feat/admin-deposit-notifications` telah digabung ke `fix/security-authentication` melalui merge commit `8219465`.
+- [x] Perubahan mencakup `NotificationController`, `WebhookController`, `AdminActivityNotification`, `FinancialStatusNotification`, template email khusus `resources/views/emails/deposit.blade.php`, dan feature test `DepositWebhookAdminNotificationTest`.
+- [x] `php artisan test --filter=DepositWebhookAdminNotificationTest`: 2 tests passed, 14 assertions. Cakupan yang dilaporkan: deposit Publisher berstatus PAID memberi notifikasi kepada seluruh Admin; user non-Admin tidak menerima notifikasi Admin.
+- [x] Pengujian lokal melalui ngrok mencapai `POST /webhooks/xendit` dan mendapat HTTP 200. Log Laravel memperlihatkan webhook Xendit dengan `status=PAID` serta `Deposit Sukses` untuk reference deposit.
+- [x] Notifikasi in-app pada website Admin tampil sebagai “Deposit Publisher Berhasil”; pengguna mengonfirmasi bahwa saat diklik, halaman membuka transaksi deposit yang benar.
+- [x] Pengguna menerima email notifikasi resmi dari Xendit untuk deposit yang berhasil. Email resmi Xendit ini dibedakan dari email internal yang dikirim aplikasi Clipkeo.
+- [ ] Pengiriman email internal Clipkeo dan FCM/push tidak boleh dianggap lulus hanya berdasarkan email Xendit atau feature test. Log sebelumnya pernah menunjukkan FCM user/token kosong dan error format tanggal pada template invoice lama. Template deposit khusus sudah ditambahkan; verifikasi pengiriman email internal hanya jika memang menjadi kebutuhan operasional.
+
+Keputusan produk yang dikonfirmasi:
+- Admin mengakses seluruh fungsi administrasi melalui website; aplikasi Android saat ini digunakan khusus oleh Clipper.
+- Hanya role `publisher` yang boleh melakukan deposit. Clipper tidak melakukan deposit langsung; saldo Clipper berasal dari reward campaign yang disetujui Publisher.
+- Temuan authorization Publisher-only di server dari bagian sebelumnya tetap terbuka dan belum diselesaikan oleh pekerjaan notifikasi ini.
+
+### B. Perbaikan penyajian gambar campaign pada website dan Android
+- [x] File gambar campaign ditemukan tetap tersimpan di `storage/app/public/bounty-images`; file asli tidak hilang.
+- [x] Penyebab storage awal: `public/storage` adalah direktori biasa yang kosong, bukan link ke `storage/app/public`.
+- [x] Direktori kosong `public/storage` dihapus tanpa operasi recursive, lalu `php artisan storage:link` berhasil membuat junction Windows dari `public/storage` ke `storage/app/public`.
+- [x] Verifikasi `Get-Item public/storage` menunjukkan `Attributes: Directory, ReparsePoint`, `LinkType: Junction`, dan target `storage/app/public`. `Test-Path` untuk file contoh melalui `public/storage/bounty-images` menghasilkan `True`.
+- [x] Gambar berhasil disajikan oleh Laravel melalui `http://127.0.0.1:8000/storage/bounty-images/...` dengan HTTP 200; URL ngrok juga mengembalikan HTTP 200.
+- [x] `clipsquad.test` mengembalikan HTTP 404 untuk file gambar. Pemeriksaan Apache menunjukkan hanya VirtualHost default Laragon dan DocumentRoot `C:/laragon/www`; tidak ada VirtualHost khusus Clipkeo yang terkonfirmasi. Apache tidak diubah; pengujian lokal dilanjutkan melalui Laravel development server pada port 8000.
+- [x] Laravel dijalankan dengan `php artisan serve --host=0.0.0.0 --port=8000`; `netstat` menunjukkan `0.0.0.0:8000` berstatus LISTENING.
+- [x] Kegagalan akses awal dari HP disebabkan alamat lama `192.168.1.102` tidak lagi sesuai. `ipconfig` menunjukkan adapter Ethernet laptop menggunakan `192.168.18.3`; setelah HP dan laptop berada pada jaringan yang dapat saling menjangkau dan URL memakai IP terbaru, gambar berhasil dibuka dari Android.
+- [x] Flutter `lib/config.dart` diperbarui: IP dev saat ini `192.168.18.3`; `fixImageUrl()` menangani host lokal (`localhost`, `127.0.0.1`, `clipsquad.test`, dan IP lama/aktif), path relatif `storage/...`, serta mempertahankan URL eksternal seperti Cloudinary.
+- [x] Flutter `lib/screens/job_detail_screen.dart` diperbaiki agar `image_path` diteruskan sebagai path mentah ke helper `fixImageUrl()`, bukan dibentuk dengan `AppConfig.baseUrl` yang sudah mengandung `/api` (yang dapat menghasilkan `/api/storage/...`). Fallback `image_url`/`thumbnail_url` tetap dipertahankan.
+- [x] `dart format` dijalankan pada kedua file. `flutter analyze` dilaporkan tidak memiliki error atau warning; terdapat 224 temuan kategori info.
+- [x] APK debug berhasil dipasang ke HP melalui ADB Wireless Debugging. Saat ADB mendeteksi lebih dari satu perangkat, instalasi diarahkan dengan serial perangkat yang dipilih (`adb -s ...`), tanpa USB.
+- [x] Pengguna mengonfirmasi seluruh gambar bounty/campaign sudah tampil pada website dan aplikasi Android.
+- [x] Perubahan Flutter di-commit dan berhasil di-push ke `fix/security-authentication`: `7d31dd4` — `Fix campaign image URLs on Android`.
+
+### C. Batasan lokal dan pekerjaan lanjutan
+- [!] `192.168.18.3` adalah IP LAN laptop pada jaringan saat pengujian, bukan alamat produksi dan dapat berubah ketika jaringan berganti. Jangan gunakan nilai hard-coded ini untuk rilis publik.
+- [ ] Pindahkan konfigurasi host/port API dan storage ke konfigurasi build/environment yang terpisah untuk development, staging, dan production (misalnya `--dart-define` atau flavor); uji ulang Google Sign-In dan seluruh API setelah perubahan konfigurasi.
+- [ ] Uji upload campaign baru oleh Publisher dari awal sampai gambar tampil pada website dan Android; pengujian yang sudah dikonfirmasi saat ini membuktikan gambar bounty tampil pada kedua platform.
+- [ ] Tambahkan/selesaikan server-side authorization Publisher-only pada endpoint deposit dan regression tests Publisher boleh, Clipper 403; temuan pada bagian 14/riwayat sebelumnya masih berlaku.
+- [ ] Lanjutkan skenario withdrawal gagal Xendit setelah saldo Clipper diperoleh melalui Publisher → campaign → submission → approval reward. Jangan deposit memakai akun Clipper atau mengubah saldo/ledger manual.
+- [ ] Tindak lanjuti bug Flutter `BOTTOM OVERFLOWED BY 7.0 PIXELS` dan pemeriksaan URL aksi notifikasi yang telah dicatat pada bagian sebelumnya.
+- [ ] Audit `apiBaseUrl` lama (`$baseUrl/clipsquad/public/api`) secara terpisah terhadap route API aktif sebelum mengubahnya; jangan mencampurkannya dengan perbaikan gambar yang sudah lulus uji.
+
+Kesimpulan: notifikasi in-app deposit Publisher untuk Admin website dan tampilan gambar campaign pada website serta Android telah berhasil dikonfirmasi. Commit terbaru branch kerja adalah `7d31dd4`; branch `main` tidak diubah.
