@@ -487,7 +487,7 @@ Status: route lokal terverifikasi; akses publik dan pemrosesan callback Xendit y
 - [ ] Dari Log Webhook, resend hanya callback gagal untuk external ID `WD-local-2` (disbursement yang sudah COMPLETED); jangan buat withdrawal/disbursement baru.
 - [ ] Verifikasi status withdrawal #2, ledger withdrawal dan platform fee, saldo, notifikasi, serta log Laravel setelah callback diterima.
 
-Status: route lokal dan publik terverifikasi; callback Xendit yang terautentikasi belum diproses ulang. Financial safety gate tetap berlaku: tidak ada payout baru, approval ulang, refund, atau perubahan saldo/ledger manual.
+Status: route lokal dan publik terverifikasi; callback Disbursement Xendit untuk `WD-local-2` sudah mencapai endpoint dan Laravel mengembalikan `Withdrawal Processed`. Verifikasi status akhir database, ledger, saldo, dan notifikasi masih berjalan. Financial safety gate tetap berlaku: tidak ada payout baru, approval ulang, refund, atau perubahan saldo/ledger manual.
 
 
 ### Koreksi konfigurasi callback: legacy Disbursement
@@ -526,3 +526,13 @@ Catatan implementasi: kode saat ini memakai legacy `POST /disbursements`; handle
 - [ ] Pastikan notifikasi serta riwayat transaksi clipper menampilkan withdrawal berhasil.
 
 Catatan: callback delivery berstatus Completed belum dengan sendirinya membuktikan logika aplikasi memproses withdrawal; cek response body karena handler dapat merespons HTTP 200 untuk callback yang diabaikan.
+
+
+### Withdrawal — Laravel mengonfirmasi callback diproses
+- [x] Buka data respons event callback Xendit terbaru.
+- [x] Response body adalah `{"message":"Withdrawal Processed"}`; Laravel mengenali dan memproses callback sebagai withdrawal, bukan mengabaikannya.
+- [ ] Periksa database lokal untuk withdrawal #2 / `WD-local-2`: status final `completed` dan `paid_at` terisi.
+- [ ] Pastikan transaksi/ledger withdrawal dan platform fee masing-masing hanya satu kali dan status final sesuai.
+- [ ] Pastikan saldo clipper konsisten serta notifikasi dan riwayat transaksi menampilkan pencairan berhasil.
+
+Catatan: response `Withdrawal Processed` membuktikan handler aplikasi memproses callback, tetapi pemeriksaan database tetap diperlukan untuk memastikan seluruh efek finansial dan notifikasi tersimpan benar. Jangan resend callback, membuat payout baru, approve ulang, refund, atau mengubah saldo/ledger manual sebelum pemeriksaan selesai.
