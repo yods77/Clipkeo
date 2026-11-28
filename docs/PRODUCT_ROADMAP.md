@@ -514,3 +514,15 @@ Jangan mengonfigurasi Payouts V2/V3 untuk integrasi kode yang sekarang, dan jang
 - [ ] Pastikan withdrawal lokal completed, ledger withdrawal dan platform_fee tersinkron, `paid_at` terisi, notifikasi terkirim, dan tidak ada transaksi/refund/transfer ganda.
 
 Catatan implementasi: kode saat ini memakai legacy `POST /disbursements`; handler webhook memerlukan header `x-callback-token`, serta `external_id` dan `status` di level root. Jangan mengonfigurasi callback Payouts V2/V3 untuk alur ini.
+
+
+### Withdrawal — callback Disbursement mencapai Completed
+- [x] Xendit menampilkan pencairan `WD-local-2` sebesar IDR 45.000 dengan status **Completed**.
+- [x] Detail Callback menunjukkan event terbaru **Completed** pada 28 Nov 2026 09:46:04 (GMT+7), sumber Otomatis, ke URL ngrok aktif.
+- [x] Dua percobaan callback sebelumnya terlihat **Failed** (09:15:50 dan 09:00:03).
+- [ ] Buka **Tampilkan Data Respon** pada event Completed terbaru; pastikan body `{"message":"Withdrawal Processed"}`, bukan respons ignored/invalid.
+- [ ] Verifikasi withdrawal request #2 / `WD-local-2` di database: status completed dan `paid_at` terisi.
+- [ ] Pastikan ledger withdrawal dan platform_fee masing-masing hanya satu kali, saldo konsisten, dan tidak ada refund ganda.
+- [ ] Pastikan notifikasi serta riwayat transaksi clipper menampilkan withdrawal berhasil.
+
+Catatan: callback delivery berstatus Completed belum dengan sendirinya membuktikan logika aplikasi memproses withdrawal; cek response body karena handler dapat merespons HTTP 200 untuk callback yang diabaikan.
