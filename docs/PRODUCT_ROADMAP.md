@@ -601,3 +601,18 @@ Kesimpulan: alur withdrawal dan konsistensi data lintas-platform pada akun Yoga 
 - [ ] Tetap perbaiki dan uji ulang Flutter bottom navigation yang overflow 7 px.
 - [x] Isi/status notifikasi lintas platform telah dikonfirmasi sama. Perbedaan ikon/warna visual antar aplikasi Android dan website tidak dianggap kegagalan sinkronisasi pada pengujian ini.
 - [ ] Uji tautan aksi notifikasi secara terpisah untuk memastikan URL tujuan dapat dibuka sesuai konteks (lokal/tunnel).
+
+
+### 28 Nov 2026 — Withdrawal: verifikasi penolakan, refund, dan kesiapan skenario gagal Xendit
+- [x] Pemeriksaan konfigurasi lokal: `XENDIT_SECRET_KEY` teridentifikasi sebagai Development Mode; `XENDIT_VERIFICATION_TOKEN` terkonfigurasi. Nilai rahasia tidak dicatat ke dokumen.
+- [x] Query transaksi user/clipper #4 (Clipper Takeover Test) menunjukkan transaksi #9 `withdrawal` Rp45.000 berstatus `failed`, `withdrawal_request_id=1`, referensi `WD-1`.
+- [x] Transaksi #10 `platform_fee` Rp5.000 untuk referensi `FEE-WD-1` berstatus `failed`.
+- [x] Transaksi #13 `withdrawal_refund` Rp50.000 berstatus `success`, referensi `WRF-WD-1`. Hanya satu baris refund ditemukan untuk user #4 pada hasil query.
+- [x] Referensi `WRF-WD-1` konsisten secara penamaan dengan withdrawal gagal `WD-1`; namun baris refund tidak memiliki `withdrawal_request_id` (NULL), sehingga hubungan ini terbukti melalui reference ID, bukan foreign-key link.
+- [x] Transaksi #14 untuk withdrawal request #3 mencatat payout Rp45.000 berstatus `success`, referensi `WD-local-3`; transaksi #15 mencatat biaya admin Rp5.000 berstatus `success`, referensi `FEE-WD-3`.
+- [x] Hasil ini mendukung bahwa skenario withdrawal gagal + fee gagal + refund penuh, serta satu withdrawal berhasil terpisah, sudah tercatat. Tidak ada refund kedua pada hasil query yang diperiksa.
+- [ ] Pengguna sedang menyiapkan saldo melalui alur deposit normal; belum ada bukti top-up baru selesai.
+- [ ] Setelah saldo tersedia, jalankan skenario Xendit Test Mode untuk disbursement gagal secara terkontrol; verifikasi status callback, refund penuh Rp50.000 tepat satu kali, fee tidak tertahan, saldo akhir, ledger, dan notifikasi pada Android serta website.
+- [ ] Jangan mengubah saldo/ledger manual dan jangan memakai rekening/payout produksi untuk pengujian.
+
+Catatan: bukti saat ini berasal dari query transaksi user #4 yang menampilkan enam baris (ID 7, 9, 10, 13, 14, 15) dan pemeriksaan `.env` yang hanya mengonfirmasi tipe key/token, bukan nilai rahasianya.
