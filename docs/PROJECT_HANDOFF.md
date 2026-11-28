@@ -634,3 +634,54 @@ Gunakan query read-only untuk memeriksa `reference_id`, `external_ref`, `paid_at
 
 ### Aturan keselamatan pengujian
 Jangan mengulang approval request ID 2, jangan menghapus atau mengubah ledger secara manual, dan jangan melakukan transfer produksi tambahan untuk keperluan pengujian tanpa persetujuan eksplisit. Jika provider menunjukkan status completed tetapi ledger lokal tetap pending, lakukan rekonsiliasi manual sebelum ada tindakan keuangan lain.
+
+
+## 20. Bukti Xendit COMPLETED dan callback ngrok gagal — 2026-11-28
+
+### Bukti dashboard Xendit
+Pengguna mengirim screenshot detail disbursement untuk withdrawal request ID 2. Screenshot menunjukkan:
+- Nominal disbursement: IDR 45,000.
+- Status provider: `Completed`.
+- External ID: `WD-local-2`.
+- Waktu dibuat: 28 Nov 2026, 08:57:34 GMT+7.
+- Waktu selesai: 28 Nov 2026, 09:00:03 GMT+7.
+- Detail callback: `Failed`, HTTP `404 Client Error`.
+- URL callback menggunakan domain ngrok `moist-smothered-miriam.ngrok-free.dev`, path `/webhooks/xendit`.
+- Body respons adalah halaman error HTML dari ngrok, bukan respons JSON dari Laravel. Pesan halaman menunjukkan endpoint ngrok tidak aktif (ERR_NGROK_3200).
+
+### Kesimpulan yang diperbarui
+Status provider kini **terkonfirmasi COMPLETED**. Pernyataan sebelumnya bahwa status transfer Xendit belum diketahui sudah tidak berlaku. Penyebab perbedaan status lokal/provider yang terlihat pada bukti adalah callback Xendit gagal mencapai aplikasi lokal karena tunnel ngrok lama tidak aktif saat callback dikirim.
+
+Status lokal terakhir yang dilaporkan tetap:
+- Withdrawal request ID 2: `processing`.
+- Ledger `withdrawal` Rp45.000: `pending`.
+- Ledger `platform_fee` Rp5.000: `pending`.
+- Belum ada notifikasi keberhasilan yang diterima pengguna.
+
+### Kesesuaian dengan implementasi
+- Route publik webhook Laravel: `POST /webhooks/xendit`.
+- Controller memvalidasi header `x-callback-token` terhadap `services.xendit.verification_token` (env `XENDIT_VERIFICATION_TOKEN`).
+- Handler mengenali external ID `WD-local-2` untuk withdrawal ID 2 selama `APP_ENV=local`, lalu menangani status `COMPLETED`.
+- `WithdrawalLedgerService::markCompleted` mengubah request menjadi `completed`, transaksi withdrawal menjadi `success`, transaksi platform fee menjadi `success`, dan mengisi `paid_at`.
+- Webhook kemudian mengirim `FinancialStatusNotification` untuk database notification, email, dan FCM.
+- Jangan mengubah ledger atau saldo secara manual. Gunakan callback resmi Xendit yang dikirim ulang setelah tunnel publik tersambung kembali.
+
+### Prosedur pemulihan
+1. Jalankan kembali aplikasi Laravel lokal dan pastikan dapat diakses.
+2. Jalankan ngrok ke port yang benar (misalnya port 80 untuk Apache Laragon atau port 8000 jika memakai `php artisan serve`). Jika memakai virtual host Laragon, sesuaikan Host Header.
+3. Perbarui callback URL Xendit menjadi `https://<domain-ngrok-aktif>/webhooks/xendit`.
+4. Pastikan konfigurasi `XENDIT_VERIFICATION_TOKEN` di Laravel sama dengan callback verification token pada konfigurasi webhook Xendit. Jangan pernah mencatat token ke Git atau membagikannya.
+5. Uji endpoint dengan POST tanpa token; respons yang diharapkan adalah HTTP 401 JSON dari Laravel (membuktikan route tercapai dan validasi token aktif), bukan halaman 404 ngrok.
+6. Setelah tunnel stabil, gunakan tombol **Kirim Ulang** pada detail callback Xendit untuk event disbursement yang sudah COMPLETED. Jangan membuat disbursement atau withdrawal baru.
+7. Periksa log Laravel dan query database. Kriteria selesai: request `completed`, withdrawal dan platform fee `success`, `paid_at` terisi, dan notifikasi tercatat/terkirim.
+
+### Status checklist terbaru
+- [x] Xendit menunjukkan disbursement ID 2 berstatus `COMPLETED` untuk IDR 45.000.
+- [x] Screenshot membuktikan callback gagal HTTP 404 pada domain ngrok lama.
+- [~] Diagnosis akar masalah: tunnel ngrok tidak aktif saat callback dikirim.
+- [ ] Aktifkan ulang tunnel dan perbarui URL callback Xendit.
+- [ ] Kirim ulang callback yang gagal dari dashboard Xendit.
+- [ ] Verifikasi perubahan status ledger lokal dan notifikasi setelah callback diterima.
+
+### Catatan keselamatan
+Disbursement sudah berstatus `COMPLETED`. Jangan mengulang approval Admin, membuat payout baru, mengubah saldo manual, mengubah status SQL manual, atau menjalankan refund. Hanya rekonsiliasi callback dari event yang sama. Simpan bukti provider dan hasil database setelah pemulihan.
