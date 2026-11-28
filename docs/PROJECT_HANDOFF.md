@@ -862,3 +862,22 @@ Status langkah berikut:
 - [ ] Jangan membuat withdrawal tambahan sebelum saldo deposit terkonfirmasi; jangan edit saldo/ledger manual; pastikan tunnel ngrok aktif dengan hostname terbaru saat callback diuji.
 
 Berikutnya minta pengguna mengirim hasil setelah deposit sukses: nominal, status invoice, dan saldo wallet. Jangan meminta screenshot yang memperlihatkan secret, callback token, nomor rekening lengkap, atau data sensitif.
+
+
+### 28 Nov 2026 — Handoff correction: Publisher deposit only; fund Clipper through campaign reward
+Pengguna mengoreksi alur bisnis: deposit hanya tersedia bagi role `publisher`; role `clipper` tidak bisa dan tidak seharusnya deposit. Instruksi sebelumnya yang meminta akun Clipper melakukan deposit adalah keliru.
+
+Alur pengisian saldo untuk pengujian withdrawal Clipper:
+1. Akun Publisher melakukan deposit melalui Xendit Test Mode ke wallet Publisher.
+2. Publisher membuat campaign dan mengalokasikan budget dari wallet Publisher.
+3. Akun Clipper mengirim submission yang memenuhi ketentuan campaign.
+4. Publisher menyetujui submission; `SubmissionController::approve()` pada branch `fix/security-authentication` mengkreditkan reward ke `clipper.wallet_balance` dan membuat transaksi `bounty_prize`.
+5. Setelah saldo reward tersedia pada akun Clipper Takeover Test, lanjutkan pengujian withdrawal gagal/sukses sesuai skenario, tanpa mengubah saldo/ledger manual.
+
+Temuan review kode yang perlu diperbaiki sebelum menganggap deposit Publisher-only aman secara backend:
+- Route web `/deposits/create` dan `POST /deposits` berada dalam grup `auth`, `verified`, dan `has.pin`; pada deklarasi yang diperiksa tidak ada middleware role Publisher.
+- `DepositController::create()` hanya mengembalikan view `deposits.create`; `store()` memvalidasi nominal lalu membuat invoice Xendit untuk `Auth::user()` tanpa pemeriksaan `role === publisher`.
+- Karena itu, jika UI menyembunyikan menu deposit dari Clipper, pembatasan tersebut belum cukup. Direct URL/POST berpotensi melewati batasan UI. Tambahkan pemeriksaan role di server/controller atau middleware khusus sebelum menyebut akses deposit benar-benar Publisher-only.
+- Buat regression tests: Publisher dapat membuat deposit; Clipper mendapat 403 pada GET form dan POST store; tidak ada invoice eksternal maupun transaksi deposit untuk Clipper.
+
+Status: [x] alur bisnis diklarifikasi; [x] reward approval teridentifikasi sebagai mekanisme kredit wallet Clipper; [ ] backend authorization Publisher-only perlu diperbaiki dan diuji; [ ] lanjutkan tes withdrawal setelah saldo Clipper masuk dari reward campaign.
