@@ -2,7 +2,7 @@
 
 > Dokumen ini adalah catatan induk untuk melanjutkan pengembangan dan pengujian Clipkeo lintas percakapan. Dokumen ini menyimpan posisi teknis terakhir. Untuk visi produk, evaluasi UX, rekomendasi fitur, prioritas skala, dan cara AI memberi saran proaktif, baca juga `docs/PRODUCT_ROADMAP.md`. Perbarui keduanya saat ada perubahan kode, keputusan produk, atau hasil pengujian baru.
 >
-> **Terakhir diperbarui:** 2026-11-27  
+> **Terakhir diperbarui:** 2026-11-28  
 > **Repository:** https://github.com/yods77/Clipkeo  
 > **Branch kerja:** `fix/security-authentication`  
 > **Aturan penting:** jangan merge ke `main` tanpa instruksi eksplisit dari pemilik proyek.
@@ -573,3 +573,64 @@ Lanjutkan ke pengujian lifecycle withdrawal secara terkontrol menggunakan sandbo
 6. Pastikan callback failed yang datang setelah status completed tidak membatalkan pembayaran atau mengembalikan saldo lagi.
 
 **Batasan:** jangan melakukan transfer uang sungguhan atau mengubah tarif/kebijakan finansial tanpa persetujuan eksplisit. Catat test yang benar-benar dijalankan beserta hasil aktual; skenario sandbox/mock tidak boleh disebut sebagai transfer produksi.
+
+
+## 19. Pembaruan 2026-11-28 — Baseline Pengujian Withdrawal
+
+### Lingkup dan sumber bukti
+Pengguna menjalankan query read-only pada database lokal `clipsquad_db` dan melaporkan bahwa dua permintaan withdrawal masuk ke halaman Admin. Admin menguji satu permintaan dengan persetujuan dan satu permintaan dengan penolakan. Output SQL yang diberikan menjadi bukti untuk status lokal saat query dijalankan.
+
+**Catatan penting:** output ini belum mengidentifikasi permintaan mana yang diajukan melalui Android dan mana yang melalui website. Karena itu, pengujian kanal Android dan website belum boleh ditandai selesai secara terpisah.
+
+### Withdrawal Request #1 — Clipper ID 4 (Clipper Takeover Test)
+- Withdrawal request ID: 1.
+- Payout method ID: 2 (Dana; empat digit terakhir rekening 0651).
+- Nominal bruto: Rp50.000.
+- Biaya admin 10%: Rp5.000.
+- Nominal bersih yang semula akan diterima: Rp45.000.
+- Status withdrawal: `rejected`.
+- Saldo Clipper ID 4 pada hasil query: Rp50.000.
+- Ledger withdrawal: satu transaksi `withdrawal` Rp45.000 berstatus `failed`.
+- Ledger biaya: satu transaksi `platform_fee` Rp5.000 berstatus `failed`.
+- Ledger refund: satu transaksi `withdrawal_refund` Rp50.000 berstatus `success`.
+
+**Kesimpulan:** jalur penolakan withdrawal dan refund penuh terverifikasi pada output database yang dilaporkan. Nominal refund sama dengan nominal bruto, termasuk biaya admin. Tidak terlihat duplikasi pada agregasi transaksi yang diberikan.
+
+### Withdrawal Request #2 — Clipper ID 1 (Yoga Dwi)
+- Withdrawal request ID: 2.
+- Payout method ID: 1 (BCA; empat digit terakhir rekening 8007).
+- Nominal bruto: Rp50.000.
+- Biaya admin 10%: Rp5.000.
+- Nominal bersih yang diharapkan diterima: Rp45.000.
+- Saldo Clipper ID 1 pada hasil query: Rp0.
+- Status withdrawal: `processing`.
+- Ledger withdrawal: satu transaksi `withdrawal` Rp45.000 berstatus `pending`.
+- Ledger biaya: satu transaksi `platform_fee` Rp5.000 berstatus `pending`.
+- Pengguna melaporkan belum menerima notifikasi keberhasilan dan belum melihat transaksi berhasil pada riwayat.
+
+**Kesimpulan:** permintaan sudah tercatat dan dana bruto telah ditahan, tetapi penyelesaian transfer belum terbukti. Status `processing` pada withdrawal dan `pending` pada kedua baris ledger konsisten dengan proses yang masih menunggu konfirmasi. Jangan mengulang approval atau membuat withdrawal baru untuk request ID 2 sebelum status provider direkonsiliasi.
+
+### Pembacaan implementasi terkait
+- `WithdrawalController::approve` mengubah request ke `processing`, memakai external ID dan idempotency key deterministik, memeriksa disbursement yang sudah ada di Xendit, dan menunggu status provider.
+- Jika status provider ditemukan `COMPLETED`, controller dapat menyelaraskan ledger menjadi sukses dan mengirim notifikasi.
+- `WebhookController::handleWithdrawal` memproses status `COMPLETED` melalui `WithdrawalLedgerService::markCompleted`, kemudian mengirim `FinancialStatusNotification`.
+- Status `FAILED` memanggil `markFailed`, mengembalikan seluruh `amount_requested`, dan mengirim notifikasi penolakan/refund.
+- Webhook memerlukan header `x-callback-token` yang cocok dengan konfigurasi `services.xendit.verification_token`.
+- Implementasi yang dibaca hanya menangani status withdrawal persis `COMPLETED` dan `FAILED`; status lain tidak mengubah ledger. Konfirmasi payload aktual dari Xendit masih diperlukan.
+
+### Status pengujian withdrawal
+- [x] Dua permintaan withdrawal tercatat dan muncul pada alur Admin menurut laporan pengguna.
+- [x] Penolakan request ID 1: withdrawal dan fee ditandai failed, refund bruto Rp50.000 tercatat success.
+- [~] Request ID 2 disetujui/diproses: saldo telah ditahan dan ledger withdrawal/fee masih pending.
+- [ ] Buktikan status disbursement ID 2 di dashboard/API Xendit dan cocokkan external ID serta provider ID.
+- [ ] Pastikan webhook Xendit untuk ID 2 diterima endpoint lokal, lolos verifikasi callback token, dan tercatat di log.
+- [ ] Pastikan request ID 2 berubah menjadi completed, transaksi withdrawal dan fee menjadi success, `paid_at` terisi, dan notifikasi database/email/FCM terkirim.
+- [ ] Jalankan pengujian withdrawal Android secara terpisah dan simpan request ID serta bukti hasilnya.
+- [ ] Jalankan pengujian withdrawal website secara terpisah dan simpan request ID serta bukti hasilnya.
+- [ ] Uji webhook duplikat dan urutan callback terlambat tanpa transfer/refund ganda.
+
+### Langkah diagnosis berikutnya
+Gunakan query read-only untuk memeriksa `reference_id`, `external_ref`, `paid_at`, dan notifikasi untuk withdrawal request ID 2. Cocokkan external ID yang tersimpan dengan disbursement di dashboard Xendit. Periksa juga log Laravel untuk event webhook masuk, reference mismatch, dan konfirmasi completion. Jangan mengirim secret, PIN, API key, callback token, atau nomor rekening lengkap ke handoff.
+
+### Aturan keselamatan pengujian
+Jangan mengulang approval request ID 2, jangan menghapus atau mengubah ledger secara manual, dan jangan melakukan transfer produksi tambahan untuk keperluan pengujian tanpa persetujuan eksplisit. Jika provider menunjukkan status completed tetapi ledger lokal tetap pending, lakukan rekonsiliasi manual sebelum ada tindakan keuangan lain.
