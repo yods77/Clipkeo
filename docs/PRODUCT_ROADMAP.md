@@ -325,7 +325,7 @@ Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, 
 - [~] Withdrawal PIN server-side, validasi ownership payout method, atomic debit, dan proteksi webhook idempotency sudah diimplementasikan pada branch; verifikasi menyeluruh pada environment lokal/staging masih diperlukan.
 - [~] API withdrawal idempotency per user dan retry recovery di Flutter sudah ditambahkan. Backend dan Flutter harus dirilis berpasangan karena API mewajibkan header `Idempotency-Key`; test pada versi kode terbaru masih harus dijalankan.
 - [ ] Idempotency approval transfer Xendit oleh Admin dan satu lifecycle ledger withdrawal yang konsisten untuk Web/API.
-- [ ] Rekonsiliasi saldo, ledger, fee, status withdrawal, dan hasil webhook untuk semua skenario sukses/gagal/duplikat.
+- [~] Rekonsiliasi awal withdrawal: satu request ditolak dengan refund bruto penuh Rp50.000 dan satu request masih processing dengan ledger pending; callback sukses dan rekonsiliasi provider belum terbukti.
 - [ ] Audit menyeluruh SSRF pada resolver URL video, validasi file upload, webhook secret/signature, dan seluruh route/ownership API.
 - [ ] Menetapkan serta menguji satu kebijakan fee yang sama pada API, UI, invoice, dan backend; jangan mengubah tarif bisnis tanpa persetujuan.
 
@@ -338,7 +338,7 @@ Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, 
 - [~] Upload bukti analytics dan tampilan submission pada alur Publisher/Admin telah dilaporkan diuji; retry upload, error state, dan seluruh edge case belum dinyatakan lulus.
 - [ ] Rekonsiliasi saldo Clipper dan transaksi reward untuk Submission #1.
 - [ ] Uji pencarian/filter/detail campaign dengan data campaign aktif yang tersedia.
-- [ ] Uji wallet statement, withdrawal, retry setelah timeout, token renewal, dan status Xendit end-to-end.
+- [~] Uji awal withdrawal manual: request ID 2 pada Clipper ID 1 berstatus processing, saldo telah ditahan, dan ledger withdrawal/fee masih pending; kanal Android atau website belum teridentifikasi. Pengujian Android dan website terpisah, retry, dan penyelesaian webhook masih terbuka.
 
 **Publisher / Web**
 - [x] Publisher berhasil login dan membuat campaign uji; validasi field wajib berjalan.
@@ -351,7 +351,7 @@ Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, 
 - [x] Aksi Tolak & Refund pada campaign uji ID 1 pernah berhasil satu kali; jangan diulang.
 - [~] Route hardening dan regression tests otorisasi Admin sudah ditambahkan ke branch; audit route dan test versi terbaru masih diperlukan.
 - [x] Uji manual end-to-end Admin Takeover dengan akun Clipper kedua: submission pending, Publisher tidak memproses, tunggu minimal 5 menit, Admin Review & Takeover, approve, lalu periksa saldo/reward/ledger untuk mencegah payout ganda (dilaporkan berhasil pengguna pada 2026-11-28).
-- [ ] Uji persetujuan deposit/withdrawal, audit trail, dan pembatasan akses role biasa.
+- [~] Uji Admin pada dua withdrawal lokal: satu request ditolak dan refund penuh Rp50.000 tercatat success; satu request disetujui dan masih menunggu konfirmasi Xendit. Audit trail, penyelesaian webhook, dan pembatasan akses role biasa masih perlu diverifikasi.
 
 ### C. Test automation dan kualitas aplikasi
 
@@ -385,3 +385,32 @@ Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, 
 5. [ ] Lanjutkan pengujian withdrawal Web/API dan simulasi webhook Xendit pada sandbox/mock atau environment test; pastikan jika transfer Xendit gagal, seluruh fee admin 10% dikembalikan sesuai kebijakan Clipkeo. Jangan gunakan transfer uang sungguhan tanpa persetujuan.
 
 **Aturan pencatatan:** status [x] hanya boleh dipakai untuk pekerjaan yang benar-benar telah diuji/dibuktikan. Implementasi yang baru ada di branch tetapi belum dijalankan tetap [~]. Hasil lokal yang belum dilaporkan tidak boleh dianggap lulus.
+
+
+## 13. Catatan Pengujian Withdrawal — 2026-11-28
+
+Pengguna melaporkan dua permintaan withdrawal telah masuk ke halaman Admin. Output query read-only database lokal menunjukkan:
+
+| Withdrawal | Clipper | Nominal bruto | Fee 10% | Bersih | Status lokal | Hasil |
+|---|---|---:|---:|---:|---|---|
+| #1 | ID 4 — Clipper Takeover Test | Rp50.000 | Rp5.000 | Rp45.000 | `rejected` | Refund Rp50.000 tercatat `success`; withdrawal dan fee `failed` |
+| #2 | ID 1 — Yoga Dwi | Rp50.000 | Rp5.000 | Rp45.000 | `processing` | Withdrawal Rp45.000 dan fee Rp5.000 masih `pending`; notifikasi berhasil belum diterima |
+
+### Interpretasi
+- Jalur penolakan dan pengembalian dana penuh mendapat bukti database untuk withdrawal #1. Refund mengembalikan nominal bruto Rp50.000, termasuk biaya admin.
+- Withdrawal #2 belum dapat dinyatakan berhasil. Status `processing` dan ledger `pending` berarti penyelesaian transfer belum terbukti pada database yang dilaporkan.
+- Implementasi menunggu webhook Xendit berstatus `COMPLETED` untuk menyelesaikan ledger dan mengirim notifikasi keberhasilan. Webhook `FAILED` memicu refund penuh.
+- Kanal asal kedua request (Android atau website) tidak disebutkan. Jangan menandai pengujian Android atau website selesai sampai masing-masing diuji dan dicatat terpisah.
+
+### Checklist pengujian
+- [x] Dua withdrawal masuk ke proses Admin.
+- [x] Satu withdrawal ditolak; refund bruto penuh tercatat satu kali.
+- [~] Satu withdrawal disetujui dan berada pada status processing; belum ada bukti callback completed.
+- [ ] Cocokkan reference ID dan provider ID request #2 dengan disbursement pada dashboard Xendit.
+- [ ] Periksa log callback dan pastikan webhook lolos validasi `x-callback-token`.
+- [ ] Verifikasi request #2 menjadi completed, ledger withdrawal dan fee menjadi success, `paid_at` terisi, serta notifikasi terkirim.
+- [ ] Uji withdrawal Android secara terpisah.
+- [ ] Uji withdrawal website secara terpisah.
+- [ ] Uji callback duplikat/terlambat dan rekonsiliasi tanpa transfer atau refund ganda.
+
+**Gate berikutnya:** jangan mengulang approval, menghapus ledger, atau membuat request pengganti untuk withdrawal #2 sebelum status provider diketahui. Semua bukti harus berasal dari output database, log, dan dashboard Xendit; status lokal `processing` bukan bukti bahwa rekening penerima sudah dikreditkan.
