@@ -475,3 +475,16 @@ Status: tunnel sebelumnya offline saat request; callback Xendit belum diuji ulan
 - [ ] Konfirmasi callback sah menghasilkan status akhir dan riwayat transaksi/notifikasi yang benar.
 
 Status: route lokal terverifikasi; akses publik dan pemrosesan callback Xendit yang sah masih menunggu. Tidak ada payout baru atau perubahan saldo manual.
+
+
+### Webhook Xendit — verifikasi publik berhasil
+- [x] Uji POST lokal tanpa `x-callback-token` ke `/webhooks/xendit` menghasilkan HTTP 401 JSON `Unauthorized`.
+- [x] Uji POST publik melalui ngrok ke `https://moiest-smotheredly-miriam.ngrok-free.dev/webhooks/xendit` juga menghasilkan HTTP 401 JSON `Unauthorized`.
+- [x] Konfirmasi: tunnel publik aktif pada saat tes dan request mencapai Laravel; ini bukan error ngrok.
+- [ ] Pada Xendit Test Mode, atur URL callback produk Disbursements ke `https://moiest-smotheredly-miriam.ngrok-free.dev/webhooks/xendit`.
+- [ ] Pastikan verification token Xendit Test Mode cocok dengan `XENDIT_VERIFICATION_TOKEN` di `.env` lokal (jangan tampilkan token ke chat/log).
+- [ ] Simpan callback URL. Jika `.env` diubah, restart Laravel server.
+- [ ] Dari Log Webhook, resend hanya callback gagal untuk external ID `WD-local-2` (disbursement yang sudah COMPLETED); jangan buat withdrawal/disbursement baru.
+- [ ] Verifikasi status withdrawal #2, ledger withdrawal dan platform fee, saldo, notifikasi, serta log Laravel setelah callback diterima.
+
+Status: route lokal dan publik terverifikasi; callback Xendit yang terautentikasi belum diproses ulang. Financial safety gate tetap berlaku: tidak ada payout baru, approval ulang, refund, atau perubahan saldo/ledger manual.
