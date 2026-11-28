@@ -536,3 +536,11 @@ Catatan: callback delivery berstatus Completed belum dengan sendirinya membuktik
 - [ ] Pastikan saldo clipper konsisten serta notifikasi dan riwayat transaksi menampilkan pencairan berhasil.
 
 Catatan: response `Withdrawal Processed` membuktikan handler aplikasi memproses callback, tetapi pemeriksaan database tetap diperlukan untuk memastikan seluruh efek finansial dan notifikasi tersimpan benar. Jangan resend callback, membuat payout baru, approve ulang, refund, atau mengubah saldo/ledger manual sebelum pemeriksaan selesai.
+
+
+### 28 Nov 2026 — Skema database withdrawal dan paid_at diverifikasi
+- [x] Struktur `withdrawal_requests` diverifikasi langsung dari database lokal: status memiliki enum `pending`, `processing`, `completed`, dan `rejected`; tabel ini tidak memiliki kolom `paid_at`.
+- [x] Struktur `transactions` diverifikasi: memiliki kolom `paid_at` dan `withdrawal_request_id` (unik) untuk menghubungkan ledger dengan withdrawal request.
+- [ ] Lanjutkan pemeriksaan data withdrawal request #2 / `WD-local-2`, transaksi yang terhubung, serta saldo clipper.
+
+Catatan koreksi pemeriksaan: waktu pembayaran harus dibaca dari baris `transactions.paid_at`, bukan dari `withdrawal_requests`. Jangan mengubah data keuangan secara manual.
