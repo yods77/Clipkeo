@@ -49,19 +49,27 @@ class FinancialStatusNotification extends Notification
     | Bagian ini yang kita update agar menampilkan desain invoice HTML
     */
     public function toMail($notifiable)
-{
-    return (new MailMessage)
-        ->subject($this->getSubject())
-        // Kita arahkan ke view invoice
-        ->view('emails.invoice', [
-            // KUNCINYA DISINI: 
-            // Blade minta '$withdrawal', maka kita kirim '$this->transaction' dengan nama 'withdrawal'
-            'withdrawal' => $this->transaction, 
-            'type'       => $this->type,
-            'status'     => $this->status,
-            'reason'     => $this->reason,
+    {
+        $mail = (new MailMessage)->subject($this->getSubject());
+
+        // Deposit menggunakan model Transaction, bukan WithdrawalRequest.
+        // Pisahkan view agar data dan format tanggal sesuai dengan modelnya.
+        if ($this->type === 'deposit') {
+            return $mail->view('emails.deposit', [
+                'transaction' => $this->transaction,
+                'status' => $this->status,
+                'reason' => $this->reason,
+            ]);
+        }
+
+        // Withdrawal tetap menggunakan template invoice yang sudah ada.
+        return $mail->view('emails.invoice', [
+            'withdrawal' => $this->transaction,
+            'type' => $this->type,
+            'status' => $this->status,
+            'reason' => $this->reason,
         ]);
-}
+    }
 
     /*
     |--------------------------------------------------------------------------

@@ -6,7 +6,8 @@ use Illuminate\Http\Request;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\WithdrawalRequest;
-use App\Notifications\FinancialStatusNotification; 
+use App\Notifications\AdminActivityNotification;
+use App\Notifications\FinancialStatusNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Services\WithdrawalLedgerService;
@@ -217,46 +218,124 @@ class WebhookController extends Controller
         // KONDISI 1: PEMBAYARAN DITERIMA (PAID / SETTLED)
         // --------------------------------------------------------------------
         if ($status === 'PAID' || $status === 'SETTLED') {
-            DB::transaction(function () use ($externalId, $data) {
-                $transaction = Transaction::where('reference_id', $externalId)->first();
+            $processedTransaction = DB::transaction(function () use ($externalId, $data) {
+                // Kunci baris transaksi agar webhook berulang yang datang
+                // bersamaan tidak dapat menambah saldo lebih dari satu kali.
+                $transaction = Transaction::where('reference_id', $externalId)
+                    ->lockForUpdate()
+                    ->first();
 
-                // Cek Idempotency: Pastikan saldo tidak ditambah dua kali
-                if ($transaction && $transaction->status !== 'success') {
-                    
-                    // A. Update Status Transaksi jadi Success
-                    $transaction->update([
-                        'status' => 'success',
-                        'payment_channel' => $data['payment_method'] ?? 'Xendit',
-                        'paid_at' => now(),
-                        'description' => 'Deposit Berhasil (Auto) via ' . ($data['payment_method'] ?? 'Xendit'),
+                if (!$transaction) {
+                    Log::warning('Webhook deposit tidak menemukan transaksi lokal.', [
+                        'external_id' => $externalId,
                     ]);
-                    
-                    // B. Tambah Saldo ke Dompet Publisher
-                    $user = User::find($transaction->user_id);
-                    if ($user) {
-                        $user->increment('wallet_balance', $transaction->amount);
-                        
-                        // C. Kirim Notifikasi Deposit Sukses
-                        try {
-                            $user->notify(new FinancialStatusNotification($transaction, 'deposit', 'success'));
-                        } catch (\Exception $e) {
-                            Log::error('Gagal kirim notif deposit: ' . $e->getMessage());
-                        }
-                    }
+
+                    return null;
                 }
+
+                // Hanya transisi pending -> success yang boleh memproses saldo
+                // dan membuat notifikasi. Callback duplikat diabaikan.
+                if ($transaction->status === 'success') {
+                    Log::info('Webhook deposit duplikat diabaikan.', [
+                        'external_id' => $externalId,
+                    ]);
+
+                    return null;
+                }
+
+                if ($transaction->status !== 'pending') {
+                    Log::warning('Webhook deposit diabaikan karena status transaksi bukan pending.', [
+                        'external_id' => $externalId,
+                        'local_status' => $transaction->status,
+                    ]);
+
+                    return null;
+                }
+
+                $user = User::whereKey($transaction->user_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$user) {
+                    Log::error('Webhook deposit tidak dapat diproses karena pemilik transaksi tidak ditemukan.', [
+                        'external_id' => $externalId,
+                        'user_id' => $transaction->user_id,
+                    ]);
+
+                    // Rollback status transaksi agar Xendit dapat mencoba
+                    // mengirim webhook kembali setelah masalah diperbaiki.
+                    throw new \RuntimeException('Deposit owner not found.');
+                }
+
+                $paymentMethod = $data['payment_method'] ?? 'Xendit';
+                if (!is_string($paymentMethod) || $paymentMethod === '') {
+                    $paymentMethod = 'Xendit';
+                }
+
+                // A. Tandai transaksi sebagai berhasil.
+                $transaction->update([
+                    'status' => 'success',
+                    'payment_channel' => $paymentMethod,
+                    'paid_at' => now(),
+                    'description' => 'Deposit Berhasil (Auto) via ' . $paymentMethod,
+                ]);
+
+                // B. Tambahkan saldo publisher tepat satu kali.
+                $user->increment('wallet_balance', $transaction->amount);
+
+                // Muat relasi user agar notifikasi admin dapat menampilkan
+                // identitas publisher tanpa query tambahan yang ambigu.
+                $transaction->setRelation('user', $user);
+
+                // C. Simpan notifikasi internal untuk seluruh akun admin.
+                // Notifikasi database berada dalam transaksi DB yang sama,
+                // sehingga status deposit, saldo, dan notifikasi konsisten.
+                $admins = User::where('role', 'admin')->get();
+
+                foreach ($admins as $admin) {
+                    $admin->notify(new AdminActivityNotification($transaction, 'deposit_success'));
+                }
+
+                if ($admins->isEmpty()) {
+                    Log::warning('Deposit berhasil, tetapi tidak ada akun admin aktif untuk menerima notifikasi.', [
+                        'external_id' => $externalId,
+                    ]);
+                }
+
+                // D. Pertahankan notifikasi sukses untuk publisher.
+                try {
+                    $user->notify(new FinancialStatusNotification($transaction, 'deposit', 'success'));
+                } catch (\Throwable $e) {
+                    Log::error('Gagal mengirim notifikasi deposit kepada publisher.', [
+                        'external_id' => $externalId,
+                        'exception' => $e->getMessage(),
+                    ]);
+                }
+
+                return $transaction;
             });
-            Log::info('Deposit Sukses: ' . $externalId);
+
+            if ($processedTransaction) {
+                Log::info('Deposit berhasil dikonfirmasi Xendit dan notifikasi admin dibuat.', [
+                    'external_id' => $externalId,
+                    'transaction_id' => $processedTransaction->id,
+                    'user_id' => $processedTransaction->user_id,
+                    'amount' => $processedTransaction->amount,
+                ]);
+            }
         }
-        
+
         // --------------------------------------------------------------------
         // KONDISI 2: PEMBAYARAN KEDALUWARSA (EXPIRED)
         // --------------------------------------------------------------------
         if ($status === 'EXPIRED') {
             $transaction = Transaction::where('reference_id', $externalId)->first();
-            
+
             if ($transaction && $transaction->status === 'pending') {
-                // Tandai transaksi gagal karena user tidak membayar tepat waktu
-                $transaction->update(['status' => 'failed', 'description' => 'Pembayaran Expired']);
+                $transaction->update([
+                    'status' => 'failed',
+                    'description' => 'Pembayaran Expired',
+                ]);
             }
         }
 
