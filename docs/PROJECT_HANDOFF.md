@@ -685,3 +685,16 @@ Status lokal terakhir yang dilaporkan tetap:
 
 ### Catatan keselamatan
 Disbursement sudah berstatus `COMPLETED`. Jangan mengulang approval Admin, membuat payout baru, mengubah saldo manual, mengubah status SQL manual, atau menjalankan refund. Hanya rekonsiliasi callback dari event yang sama. Simpan bukti provider dan hasil database setelah pemulihan.
+
+
+### Kendala lanjutan: ngrok CLI belum tersedia di PowerShell
+Pada 28 Nov 2026, pengguna menjalankan `ngrok http 8000` dan `ngrok http 80` dari PowerShell (working directory `E:\\Clipkeo`). Keduanya gagal dengan `CommandNotFoundException`: Windows tidak menemukan executable `ngrok`. Pengguna mengonfirmasi Laravel lokal berjalan/diakses melalui `http://127.0.0.1:8000`.
+
+Langkah berikutnya:
+1. Instal ngrok CLI untuk Windows (jalur resmi yang direkomendasikan: `winget install ngrok -s msstore`, atau unduh executable Windows dari situs resmi ngrok).
+2. Buka PowerShell baru dan verifikasi `ngrok version`.
+3. Tambahkan authtoken dari dashboard akun ngrok dengan `ngrok config add-authtoken <TOKEN>`; token tidak boleh ditempel ke chat, log, atau Git.
+4. Jalankan `ngrok http 8000`, biarkan terminal tetap terbuka, lalu uji URL HTTPS publik.
+5. Perbarui callback Xendit ke `https://<domain-ngrok-aktif>/webhooks/xendit` dan kirim ulang event COMPLETED yang sama.
+
+Status: instalasi CLI, tunnel aktif, callback resend, dan rekonsiliasi database masih belum diverifikasi. Jangan membuat payout baru atau mengubah saldo/ledger secara manual.
