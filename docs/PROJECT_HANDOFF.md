@@ -840,3 +840,25 @@ Kesimpulan: alur withdrawal dan konsistensi data lintas-platform pada akun Yoga 
 - [ ] Tetap perbaiki dan uji ulang Flutter bottom navigation yang overflow 7 px.
 - [x] Isi/status notifikasi lintas platform telah dikonfirmasi sama. Perbedaan ikon/warna visual antar aplikasi Android dan website tidak dianggap kegagalan sinkronisasi pada pengujian ini.
 - [ ] Uji tautan aksi notifikasi secara terpisah untuk memastikan URL tujuan dapat dibuka sesuai konteks (lokal/tunnel).
+
+
+### 28 Nov 2026 — Handoff: status refund withdrawal user #4 dan persiapan tes payout gagal
+Kondisi terbaru dari pengguna:
+- Environment `.env`: Xendit key dikenali sebagai **Development** dan verification token webhook terkonfigurasi. Jangan meminta atau mencatat nilai secret/token.
+- User #4 / Clipper Takeover Test memiliki transaksi #9 `withdrawal` Rp45.000, `failed`, `withdrawal_request_id=1`, reference `WD-1`.
+- Transaksi #10 `platform_fee` Rp5.000, `failed`, reference `FEE-WD-1`.
+- Transaksi #13 `withdrawal_refund` Rp50.000, `success`, reference `WRF-WD-1`; satu baris refund ditemukan pada hasil query.
+- Catatan integritas referensi: #13 tidak memiliki `withdrawal_request_id` (NULL). Reference `WRF-WD-1` cocok secara penamaan dengan `WD-1`, tetapi relasi tidak ditegakkan melalui FK pada kolom tersebut.
+- Withdrawal kedua user #4 adalah transaksi #14, request #3, Rp45.000 `success`, reference `WD-local-3`; fee #15 Rp5.000 `success`, reference `FEE-WD-3`.
+- Hasil ini menunjukkan skenario rejection/failure + full refund dan withdrawal success terpisah tercatat. Jangan menganggap hubungan refund sebagai FK atau mengubah ledger secara manual.
+
+Status langkah berikut:
+- [x] Konfirmasi jenis Xendit key = Development.
+- [x] Konfirmasi verification token terkonfigurasi (nilai tidak dibagikan).
+- [x] Verifikasi ledger withdrawal gagal, fee gagal, dan satu refund penuh Rp50.000 untuk user #4.
+- [x] Verifikasi withdrawal sukses Rp45.000 dan fee sukses Rp5.000 untuk request #3.
+- [ ] Pengguna sedang menyiapkan saldo melalui deposit normal; tunggu konfirmasi deposit selesai dan saldo ter-update.
+- [ ] Setelah saldo siap, lakukan pengujian disbursement gagal pada Xendit Test Mode, lalu cek callback Laravel, status request, ledger, refund penuh tepat satu kali, saldo wallet, notifikasi, dan riwayat Android/web.
+- [ ] Jangan membuat withdrawal tambahan sebelum saldo deposit terkonfirmasi; jangan edit saldo/ledger manual; pastikan tunnel ngrok aktif dengan hostname terbaru saat callback diuji.
+
+Berikutnya minta pengguna mengirim hasil setelah deposit sukses: nominal, status invoice, dan saldo wallet. Jangan meminta screenshot yang memperlihatkan secret, callback token, nomor rekening lengkap, atau data sensitif.
