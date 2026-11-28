@@ -430,3 +430,14 @@ Screenshot detail Xendit mengonfirmasi withdrawal request ID 2 (external ID `WD-
 - [ ] Pastikan request ID 2 `completed`, ledger withdrawal dan platform fee `success`, `paid_at` terisi, dan notifikasi berhasil terkirim.
 
 **Financial safety gate:** status transfer sudah `COMPLETED`; jangan approve ulang, mengirim transfer baru, refund, atau mengubah saldo/ledger manual. Pulihkan pencatatan lokal melalui callback resmi untuk disbursement yang sama.
+
+
+### Kendala setup lokal: ngrok CLI belum dikenali
+- [x] Identifikasi penyebab perintah `ngrok` tidak berjalan: PowerShell menghasilkan `CommandNotFoundException` untuk `ngrok http 8000` dan `ngrok http 80`.
+- [x] Konfirmasi alamat Laravel lokal: `http://127.0.0.1:8000`.
+- [ ] Instal ngrok CLI Windows melalui sumber resmi; metode WinGet yang dicantumkan ngrok: `winget install ngrok -s msstore`.
+- [ ] Verifikasi instalasi dengan `ngrok version`, konfigurasi authtoken, lalu jalankan `ngrok http 8000`.
+- [ ] Perbarui URL webhook Xendit ke domain ngrok aktif dengan path `/webhooks/xendit`.
+- [ ] Resend callback untuk disbursement COMPLETED yang sama dan verifikasi ledger serta notifikasi.
+
+Status saat ini: blocker setup tunnel; belum ada callback baru yang diterima. Jangan mengulang transfer atau mengubah saldo/ledger secara manual.
