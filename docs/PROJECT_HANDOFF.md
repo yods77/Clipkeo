@@ -761,3 +761,17 @@ Screenshot detail pencairan Xendit untuk external ID `WD-local-2` menunjukkan no
 Langkah verifikasi berikutnya: klik **Tampilkan Data Respon** pada event Completed 09:46:04 dan periksa body respons. Respons yang diharapkan dari `WebhookController` untuk withdrawal yang dikenali adalah `{"message":"Withdrawal Processed"}`; jika `{"message":"Ignored - Kode tidak dikenali"}`, callback terkirim tetapi external_id tidak dikenali; jika `Invalid webhook payload` atau pesan lain, telusuri payload/token. Jangan resend ulang dan jangan membuat withdrawal baru sebelum pemeriksaan ini selesai.
 
 Setelah response body cocok, verifikasi database lokal untuk withdrawal request #2 / external ID `WD-local-2`: status `completed`, kolom `paid_at` terisi, ledger withdrawal dan platform_fee masing-masing tercatat tepat satu kali dengan status final yang sesuai, saldo clipper tetap konsisten, serta notifikasi/riwayat transaksi menunjukkan berhasil. Jangan approve ulang, refund, atau mengubah saldo/ledger manual.
+
+
+### 28 Nov 2026 — Callback Disbursement diproses oleh Laravel
+Response body yang ditampilkan Xendit untuk event Disbursement Completed terbaru adalah:
+
+```json
+{
+  "message": "Withdrawal Processed"
+}
+```
+
+Ini mengonfirmasi endpoint ngrok mencapai Laravel dan handler mengenali callback sebagai withdrawal (bukan respons ignored). Xendit sebelumnya menampilkan status pencairan `WD-local-2` sebesar IDR 45.000 sebagai Completed. Namun, efek akhir pada database, ledger, saldo, dan notifikasi masih harus diverifikasi terpisah.
+
+Langkah berikutnya: periksa kolom `withdrawal_requests` dan `transactions`, lalu cocokkan withdrawal #2 / `WD-local-2` dengan transaksi ledger. Pastikan status final completed, waktu pembayaran terisi, setiap entri hanya satu kali, saldo clipper konsisten, dan notifikasi/riwayat transaksi berhasil. Jangan resend callback, membuat payout baru, approve ulang, refund, atau mengubah saldo/ledger manual.
