@@ -452,3 +452,15 @@ Status saat ini: blocker setup tunnel; belum ada callback baru yang diterima. Ja
 - [ ] Resend callback untuk disbursement COMPLETED yang sama; verifikasi ledger dan notifikasi lokal.
 
 Status: tunnel online, tetapi endpoint dan callback Xendit belum terverifikasi. Jangan mengirim transfer baru atau mengubah saldo/ledger manual.
+
+
+### Withdrawal webhook — diagnosis tunnel ngrok
+- [x] Percobaan POST ke hostname ngrok lama menghasilkan HTTP 404 HTML `ERR_NGROK_3200` (endpoint offline).
+- [x] Diagnosis: request belum mencapai Laravel; belum ada hasil uji route maupun callback-token.
+- [ ] Pastikan Laravel server tetap berjalan pada port 8000.
+- [ ] Jalankan kembali `ngrok http 8000` dan pertahankan terminal tetap terbuka.
+- [ ] Gunakan hostname HTTPS yang benar-benar tampil pada sesi ngrok aktif.
+- [ ] Uji endpoint lokal dan publik; hasil yang diharapkan adalah HTTP 401 JSON dari `WebhookController` saat header `x-callback-token` tidak diberikan.
+- [ ] Setelah endpoint terverifikasi, baru perbarui callback URL Xendit dan resend callback untuk disbursement yang sama.
+
+Status: tunnel sebelumnya offline saat request; callback Xendit belum diuji ulang. Jangan membuat payout baru atau mengubah saldo/ledger secara manual.
