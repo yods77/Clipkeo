@@ -488,3 +488,17 @@ Status: route lokal terverifikasi; akses publik dan pemrosesan callback Xendit y
 - [ ] Verifikasi status withdrawal #2, ledger withdrawal dan platform fee, saldo, notifikasi, serta log Laravel setelah callback diterima.
 
 Status: route lokal dan publik terverifikasi; callback Xendit yang terautentikasi belum diproses ulang. Financial safety gate tetap berlaku: tidak ada payout baru, approval ulang, refund, atau perubahan saldo/ledger manual.
+
+
+### Koreksi konfigurasi callback: legacy Disbursement
+- [x] Screenshot Webhooks menunjukkan URL ngrok sebelumnya dipasang pada **Payment Links → Invoices paid**, bukan webhook withdrawal.
+- [x] Riwayat Payment Links memberi HTTP 200 dengan pesan `Ignored - Kode tidak dikenali`; event ini tidak menguji alur withdrawal.
+- [x] Audit source code: Clipkeo menggunakan endpoint legacy Xendit `/disbursements` dan controller menerima payload `external_id` + `status` untuk status `COMPLETED`/ `FAILED`.
+- [x] Dokumentasi resmi Xendit membedakan callback legacy `disbursement` dari webhook `payout` untuk Payouts V2 dan Payouts V3.
+- [ ] Klik **Ubah ke Versi Lama** pada halaman Webhooks Xendit.
+- [ ] Cari webhook **Disbursement** (Money-Out) pada versi lama dan pasang URL ngrok aktif pada event tersebut.
+- [ ] Pastikan Test Mode dan cocokkan token verifikasi callback Xendit dengan `XENDIT_VERIFICATION_TOKEN` lokal.
+- [ ] Resend hanya callback legacy Disbursement yang gagal untuk `WD-local-2` (sudah COMPLETED di Xendit).
+- [ ] Verifikasi status withdrawal, ledger withdrawal/platform fee, `paid_at`, saldo, notifikasi, dan log Laravel.
+
+Jangan mengonfigurasi Payouts V2/V3 untuk integrasi kode yang sekarang, dan jangan membuat transfer baru, approve ulang, refund, atau mengubah saldo/ledger manual.
