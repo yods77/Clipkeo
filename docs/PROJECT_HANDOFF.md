@@ -815,3 +815,16 @@ Kesimpulan sementara: pencatatan withdrawal dan biaya admin sudah konsisten di d
 - [ ] Periksa URL pada data notifikasi sukses: tersimpan sebagai `http://moiest-smothered-miriam.ngrok-free.dev/wallet`, sedangkan hostname tunnel aktif yang dipakai pada pengujian publik adalah `moiest-smotheredly-miriam.ngrok-free.dev` dengan HTTPS. Kemungkinan URL notifikasi tidak sesuai host/protokol tunnel; uji klik dengan hati-hati dan jangan menganggap URL itu valid. Tentukan konfigurasi URL publik yang benar setelah pengujian UI.
 
 Kesimpulan: data notifikasi keberhasilan sudah dibuat di database, tetapi tampilan pada perangkat/web dan URL aksi notifikasi masih perlu diuji. Jangan mengubah status finansial atau membuat withdrawal baru.
+
+  
+### 28 Nov 2026 — Verifikasi tampilan withdrawal Android dan website
+- [x] Android: halaman Notifikasi menampilkan "Penarikan Dana Berhasil" dengan pesan dana Rp45.000 berhasil dikirim; notifikasi "Penarikan Dana Sedang Diproses" juga tetap tersedia.
+- [x] Android: Dompet Digital menampilkan saldo utama Rp0 dan riwayat withdrawal -Rp45.000, biaya admin -Rp5.000, serta reward campaign +Rp50.000.
+- [x] Website: Monitor Transaksi menampilkan saldo aktif Rp0, transaksi withdrawal -Rp45.000, admin fee -Rp5.000, refund withdrawal +Rp50.000, dan catatan withdrawal gagal.
+- [x] Website: dropdown notifikasi menampilkan pemberitahuan withdrawal berhasil dan sedang diproses.
+- [ ] Catatan konsistensi akun: screenshot Android menampilkan akun Yoga Dwi, sedangkan screenshot website menampilkan Clipper Takeover Test. Referensi website yang terlihat adalah WD-local-3/FEE-WD-3, sedangkan bukti database sebelumnya untuk Yoga Dwi adalah WD-local-2/FEE-WD-2. Karena akun dan referensi berbeda, hasil ini membuktikan tampilan pada kedua platform, tetapi belum membuktikan bahwa satu transaksi yang sama tersinkron identik di Android dan website. Ulangi pemeriksaan dengan akun clipper dan withdrawal_request yang sama di kedua platform.
+- [ ] UI defect Android: screenshot memperlihatkan peringatan Flutter "BOTTOM OVERFLOWED BY 7.0 PIXELS" di area bottom navigation. Catat sebagai bug layout untuk diperbaiki dan diuji ulang pada ukuran layar perangkat.
+- [ ] UI consistency: ikon notifikasi sukses di Android terlihat seperti ikon dompet oranye, sedangkan payload database sebelumnya menyimpan icon check-circle dan color green. Verifikasi mapping ikon/warna agar status sukses tampil konsisten.
+- [ ] URL action notification: temuan hostname/protokol URL pada payload notifikasi sukses sebelumnya masih perlu diverifikasi; pastikan tautan menuju domain publik/tunnel yang benar atau URL lokal yang sesuai konteks.
+  
+Kesimpulan: pengujian visual withdrawal di Android dan website berhasil untuk data yang tampil. Status akhir lintas-platform untuk satu transaksi yang sama masih menunggu uji akun/referensi identik. Bug overflow 7 px dan konsistensi ikon notifikasi dicatat sebagai pekerjaan lanjutan.
