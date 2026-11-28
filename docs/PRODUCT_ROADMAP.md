@@ -616,3 +616,13 @@ Kesimpulan: alur withdrawal dan konsistensi data lintas-platform pada akun Yoga 
 - [ ] Jangan mengubah saldo/ledger manual dan jangan memakai rekening/payout produksi untuk pengujian.
 
 Catatan: bukti saat ini berasal dari query transaksi user #4 yang menampilkan enam baris (ID 7, 9, 10, 13, 14, 15) dan pemeriksaan `.env` yang hanya mengonfirmasi tipe key/token, bukan nilai rahasianya.
+
+
+### 28 Nov 2026 — Koreksi alur pendanaan saldo Clipper dan temuan otorisasi deposit
+- [x] Klarifikasi pemilik produk/pengguna: hanya akun dengan role `publisher` yang dapat melakukan deposit; akun `clipper` tidak melakukan deposit langsung.
+- [x] Jalur pengujian saldo Clipper yang sesuai: Publisher melakukan deposit ke wallet Publisher → Publisher membuat campaign dan mengunci/mengalokasikan budget → Clipper menyelesaikan submission → Publisher menyetujui submission → reward dikreditkan ke wallet Clipper.
+- [x] Pemeriksaan `SubmissionController::approve()` pada branch ini menunjukkan reward menambah `clipper.wallet_balance` dan membuat transaksi `bounty_prize` berstatus `success`.
+- [!] Temuan otorisasi yang perlu ditindaklanjuti: route `/deposits/create` dan `POST /deposits` berada di dalam middleware `auth`, `verified`, dan `has.pin`, tetapi tidak terlihat role middleware Publisher. `DepositController::create()` dan `store()` yang diperiksa juga belum memanggil pemeriksaan role Publisher. Menu yang disembunyikan pada UI saja tidak cukup untuk mencegah Clipper mengakses endpoint secara langsung.
+- [ ] Tambahkan server-side authorization `role === publisher` pada halaman dan proses deposit (serta endpoint terkait bila ada), kemudian buat feature test: Publisher boleh membuka/membuat deposit; Clipper menerima HTTP 403 dan tidak ada invoice/transaction deposit yang dibuat.
+- [ ] Untuk tes withdrawal Clipper Takeover Test, jangan minta akun Clipper deposit. Gunakan saldo reward campaign yang dibayarkan melalui alur Publisher → campaign → submission approval. Setelah reward masuk, baru uji withdrawal Xendit Test Mode.
+- [ ] Jangan edit wallet balance/ledger manual dan jangan melakukan deposit memakai akun Clipper.
