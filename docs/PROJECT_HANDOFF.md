@@ -783,3 +783,13 @@ Langkah berikutnya: periksa kolom `withdrawal_requests` dan `transactions`, lalu
 - [ ] Lanjutkan pemeriksaan data withdrawal request #2 / `WD-local-2`, transaksi yang terhubung, serta saldo clipper.
 
 Catatan koreksi pemeriksaan: waktu pembayaran harus dibaca dari baris `transactions.paid_at`, bukan dari `withdrawal_requests`. Jangan mengubah data keuangan secara manual.
+
+
+### 28 Nov 2026 — Withdrawal WD-local-2 terkonfirmasi completed di database
+- [x] Withdrawal request #2 untuk user/clipper #1 berstatus `completed`; nominal diminta Rp50.000, biaya admin Rp5.000, dan dana bersih Rp45.000.
+- [x] Transaksi #11 bertipe `withdrawal` tercatat tepat satu baris untuk `withdrawal_request_id=2`, referensi `WD-local-2`, nominal Rp45.000, status `success`, dan `paid_at=2026-11-28 09:45:52`.
+- [x] Saldo wallet clipper #1 setelah pencairan tercatat Rp0, konsisten dengan saldo awal Rp50.000 dikurangi permintaan Rp50.000.
+- [ ] Periksa seluruh transaksi `withdrawal`, `platform_fee`, dan `withdrawal_refund` milik clipper #1 untuk memastikan status biaya admin sudah sesuai dan tidak ada entri pending yang tertinggal.
+- [ ] Periksa notifikasi dan riwayat transaksi pada aplikasi Android serta website clipper.
+
+Kesimpulan: callback Xendit untuk `WD-local-2` diproses oleh Laravel dan withdrawal lokal telah tercatat completed/success. Namun verifikasi status ledger biaya admin serta tampilan notifikasi/riwayat di sisi pengguna masih terbuka. Jangan membuat withdrawal baru atau mengubah saldo/ledger manual sebelum pemeriksaan lanjutan selesai.
