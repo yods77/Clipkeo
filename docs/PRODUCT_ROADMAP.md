@@ -554,3 +554,14 @@ Catatan koreksi pemeriksaan: waktu pembayaran harus dibaca dari baris `transacti
 - [ ] Periksa notifikasi dan riwayat transaksi pada aplikasi Android serta website clipper.
 
 Kesimpulan: callback Xendit untuk `WD-local-2` diproses oleh Laravel dan withdrawal lokal telah tercatat completed/success. Namun verifikasi status ledger biaya admin serta tampilan notifikasi/riwayat di sisi pengguna masih terbuka. Jangan membuat withdrawal baru atau mengubah saldo/ledger manual sebelum pemeriksaan lanjutan selesai.
+
+
+### 28 Nov 2026 — Withdrawal ledger dan biaya admin terkonfirmasi
+- [x] Transaksi #11 milik clipper #1: `withdrawal` Rp45.000, status `success`, referensi `WD-local-2`, terhubung ke withdrawal request #2, dan `paid_at` terisi.
+- [x] Transaksi #12 milik clipper #1: `platform_fee` Rp5.000, status `success`, referensi `FEE-WD-2`, deskripsi biaya admin withdrawal 10%.
+- [x] Total ledger withdrawal dan biaya admin cocok dengan permintaan Rp50.000; kedua entri tercatat satu kali pada hasil query.
+- [x] Struktur tabel Laravel `notifications` tersedia: kolom `type`, `notifiable_type`, `notifiable_id`, `data`, `read_at`, dan timestamp.
+- [ ] Periksa baris notifikasi aktual untuk clipper #1 dan pastikan ada notifikasi withdrawal berhasil.
+- [ ] Periksa riwayat transaksi dan notifikasi pada aplikasi Android serta website.
+
+Kesimpulan sementara: pencatatan withdrawal dan biaya admin sudah konsisten di database. Keberadaan serta keterlihatan notifikasi pada sisi pengguna belum diverifikasi; struktur tabel bukan bukti bahwa notifikasi sudah dibuat atau ditampilkan.
