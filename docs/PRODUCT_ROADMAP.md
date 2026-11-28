@@ -414,3 +414,19 @@ Pengguna melaporkan dua permintaan withdrawal telah masuk ke halaman Admin. Outp
 - [ ] Uji callback duplikat/terlambat dan rekonsiliasi tanpa transfer atau refund ganda.
 
 **Gate berikutnya:** jangan mengulang approval, menghapus ledger, atau membuat request pengganti untuk withdrawal #2 sebelum status provider diketahui. Semua bukti harus berasal dari output database, log, dan dashboard Xendit; status lokal `processing` bukan bukti bahwa rekening penerima sudah dikreditkan.
+
+
+## 14. Xendit Completed, Webhook 404 melalui ngrok — 2026-11-28
+
+Screenshot detail Xendit mengonfirmasi withdrawal request ID 2 (external ID `WD-local-2`) dengan nominal bersih IDR 45.000 telah berstatus `Completed` pada 28 Nov 2026 pukul 09:00:03 GMT+7. Callback ke domain ngrok lama gagal dengan HTTP 404 dan halaman error HTML ngrok (endpoint offline/ERR_NGROK_3200). Dengan demikian, transfer provider selesai; ketidaksinkronan database lokal terjadi karena callback tidak mencapai Laravel.
+
+### Prioritas pemulihan
+- [x] Konfirmasi status provider `COMPLETED` melalui screenshot dashboard.
+- [x] Identifikasi callback gagal pada tunnel ngrok lama (HTTP 404).
+- [ ] Jalankan aplikasi lokal dan tunnel ngrok yang aktif pada port/virtual host yang benar.
+- [ ] Perbarui callback URL Xendit ke domain ngrok aktif dengan path `/webhooks/xendit`.
+- [ ] Pastikan callback verification token cocok dengan `XENDIT_VERIFICATION_TOKEN` Laravel.
+- [ ] Kirim ulang callback yang gagal melalui tombol **Kirim Ulang** pada dashboard Xendit; jangan membuat disbursement baru.
+- [ ] Pastikan request ID 2 `completed`, ledger withdrawal dan platform fee `success`, `paid_at` terisi, dan notifikasi berhasil terkirim.
+
+**Financial safety gate:** status transfer sudah `COMPLETED`; jangan approve ulang, mengirim transfer baru, refund, atau mengubah saldo/ledger manual. Pulihkan pencatatan lokal melalui callback resmi untuk disbursement yang sama.
