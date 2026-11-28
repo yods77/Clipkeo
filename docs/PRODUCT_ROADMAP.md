@@ -502,3 +502,15 @@ Status: route lokal dan publik terverifikasi; callback Xendit yang terautentikas
 - [ ] Verifikasi status withdrawal, ledger withdrawal/platform fee, `paid_at`, saldo, notifikasi, dan log Laravel.
 
 Jangan mengonfigurasi Payouts V2/V3 untuk integrasi kode yang sekarang, dan jangan membuat transfer baru, approve ulang, refund, atau mengubah saldo/ledger manual.
+
+
+### Withdrawal webhook — konfigurasi legacy Disbursement
+- [x] Beralih dari tampilan webhook baru ke tampilan legacy Xendit berhasil; screenshot 28 Nov 2026 menunjukkan halaman legacy.
+- [x] Baris/daftar callback legacy Money-Out terlihat.
+- [ ] Pada baris **DISBURSEMENT** legacy (bukan Payouts V2/V3), pastikan URL persis `https://moiest-smotheredly-miriam.ngrok-free.dev/webhooks/xendit`.
+- [ ] Klik **Test dan Simpan** pada baris Disbursement tersebut.
+- [ ] Cocokkan verification token Xendit dengan `XENDIT_VERIFICATION_TOKEN` / `services.xendit.verification_token` di Laravel.
+- [ ] Verifikasi callback pada Webhook Log; resend hanya event Disbursement untuk withdrawal #2 / `WD-local-2` yang telah Completed di Xendit.
+- [ ] Pastikan withdrawal lokal completed, ledger withdrawal dan platform_fee tersinkron, `paid_at` terisi, notifikasi terkirim, dan tidak ada transaksi/refund/transfer ganda.
+
+Catatan implementasi: kode saat ini memakai legacy `POST /disbursements`; handler webhook memerlukan header `x-callback-token`, serta `external_id` dan `status` di level root. Jangan mengonfigurasi callback Payouts V2/V3 untuk alur ini.
