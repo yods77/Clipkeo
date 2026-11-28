@@ -775,3 +775,11 @@ Response body yang ditampilkan Xendit untuk event Disbursement Completed terbaru
 Ini mengonfirmasi endpoint ngrok mencapai Laravel dan handler mengenali callback sebagai withdrawal (bukan respons ignored). Xendit sebelumnya menampilkan status pencairan `WD-local-2` sebesar IDR 45.000 sebagai Completed. Namun, efek akhir pada database, ledger, saldo, dan notifikasi masih harus diverifikasi terpisah.
 
 Langkah berikutnya: periksa kolom `withdrawal_requests` dan `transactions`, lalu cocokkan withdrawal #2 / `WD-local-2` dengan transaksi ledger. Pastikan status final completed, waktu pembayaran terisi, setiap entri hanya satu kali, saldo clipper konsisten, dan notifikasi/riwayat transaksi berhasil. Jangan resend callback, membuat payout baru, approve ulang, refund, atau mengubah saldo/ledger manual.
+
+
+### 28 Nov 2026 — Skema database withdrawal dan paid_at diverifikasi
+- [x] Struktur `withdrawal_requests` diverifikasi langsung dari database lokal: status memiliki enum `pending`, `processing`, `completed`, dan `rejected`; tabel ini tidak memiliki kolom `paid_at`.
+- [x] Struktur `transactions` diverifikasi: memiliki kolom `paid_at` dan `withdrawal_request_id` (unik) untuk menghubungkan ledger dengan withdrawal request.
+- [ ] Lanjutkan pemeriksaan data withdrawal request #2 / `WD-local-2`, transaksi yang terhubung, serta saldo clipper.
+
+Catatan koreksi pemeriksaan: waktu pembayaran harus dibaca dari baris `transactions.paid_at`, bukan dari `withdrawal_requests`. Jangan mengubah data keuangan secara manual.
