@@ -698,3 +698,16 @@ Langkah berikutnya:
 5. Perbarui callback Xendit ke `https://<domain-ngrok-aktif>/webhooks/xendit` dan kirim ulang event COMPLETED yang sama.
 
 Status: instalasi CLI, tunnel aktif, callback resend, dan rekonsiliasi database masih belum diverifikasi. Jangan membuat payout baru atau mengubah saldo/ledger secara manual.
+
+
+### Status tunnel terbaru: ngrok sudah online
+Pada 28 Nov 2026 pengguna mengirim screenshot ngrok v3.39.13. Session berstatus `online`, region `Asia Pacific (ap)`, Web Interface `http://127.0.0.1:4040`, forwarding `https://moist-smothered-miriam.ngrok-free.dev -> http://localhost:8000`. Ini sesuai alamat Laravel lokal yang dikonfirmasi pengguna (`http://127.0.0.1:8000`). Tunnel sudah aktif pada saat screenshot, tetapi endpoint webhook belum diuji dari luar dan callback Xendit belum dikirim ulang.
+
+Verifikasi kode pada branch ini: `routes/web.php` mendaftarkan `POST /webhooks/xendit` ke `WebhookController::handle`; `bootstrap/app.php` mengecualikan path webhook dari CSRF; controller membandingkan header `x-callback-token` dengan `services.xendit.verification_token` dan mengembalikan JSON HTTP 401 `Unauthorized` bila token tidak ada/tidak cocok. Maka POST uji tanpa token ke domain aktif seharusnya menghasilkan 401 JSON Laravel, bukan 404 HTML ngrok.
+
+Perintah uji (jalankan di PowerShell kedua, jangan tutup terminal ngrok):
+```powershell
+curl.exe -i -X POST "https://moist-smothered-miriam.ngrok-free.dev/webhooks/xendit" -H "Content-Type: application/json" -d "{}"
+```
+
+Langkah berikut: catat output uji; bila HTTP 401 JSON, endpoint sudah mencapai Laravel. Selanjutnya perbarui callback URL di dashboard Xendit ke `https://moist-smothered-miriam.ngrok-free.dev/webhooks/xendit`, pastikan verification token sesuai tanpa membagikan nilainya, lalu resend callback untuk disbursement `WD-local-2` yang sudah COMPLETED. Jangan membuat payout baru atau mengubah saldo/ledger manual.
