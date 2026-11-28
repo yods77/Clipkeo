@@ -441,3 +441,14 @@ Screenshot detail Xendit mengonfirmasi withdrawal request ID 2 (external ID `WD-
 - [ ] Resend callback untuk disbursement COMPLETED yang sama dan verifikasi ledger serta notifikasi.
 
 Status saat ini: blocker setup tunnel; belum ada callback baru yang diterima. Jangan mengulang transfer atau mengubah saldo/ledger secara manual.
+
+
+### Pembaruan tunnel ngrok — online
+- [x] Screenshot menunjukkan ngrok v3.39.13 berstatus `online`.
+- [x] Tunnel meneruskan `https://moist-smothered-miriam.ngrok-free.dev` ke `http://localhost:8000`, sesuai alamat Laravel lokal pengguna.
+- [x] Pemeriksaan kode: route `POST /webhooks/xendit` terdaftar di `routes/web.php`; controller mengembalikan JSON HTTP 401 `Unauthorized` saat header `x-callback-token` tidak ada/tidak cocok.
+- [ ] Uji endpoint dari PowerShell kedua; hasil yang diharapkan adalah HTTP 401 JSON Laravel (bukan 404 HTML ngrok).
+- [ ] Perbarui callback URL Xendit ke `https://moist-smothered-miriam.ngrok-free.dev/webhooks/xendit` dan pastikan verification token cocok.
+- [ ] Resend callback untuk disbursement COMPLETED yang sama; verifikasi ledger dan notifikasi lokal.
+
+Status: tunnel online, tetapi endpoint dan callback Xendit belum terverifikasi. Jangan mengirim transfer baru atau mengubah saldo/ledger manual.
