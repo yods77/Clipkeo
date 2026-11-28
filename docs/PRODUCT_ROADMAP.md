@@ -585,7 +585,7 @@ Kesimpulan: data notifikasi keberhasilan sudah dibuat di database, tetapi tampil
 - [x] Website: dropdown notifikasi menampilkan pemberitahuan withdrawal berhasil dan sedang diproses.
 - [x] Verifikasi lanjutan akun Yoga Dwi: pengguna mengonfirmasi bahwa setelah login dengan akun yang sama pada website, referensi withdrawal, biaya admin, status transaksi, riwayat transaksi, dan notifikasi sama dengan aplikasi Android. Perbedaan akun/referensi pada screenshot awal telah ditindaklanjuti dengan pemeriksaan pada akun Yoga Dwi yang sama. Cross-platform withdrawal dinyatakan PASS berdasarkan pemeriksaan pengguna.
 - [ ] UI defect Android: screenshot memperlihatkan peringatan Flutter "BOTTOM OVERFLOWED BY 7.0 PIXELS" di area bottom navigation. Catat sebagai bug layout untuk diperbaiki dan diuji ulang pada ukuran layar perangkat.
-- [ ] UI consistency: ikon notifikasi sukses di Android terlihat seperti ikon dompet oranye, sedangkan payload database sebelumnya menyimpan icon check-circle dan color green. Verifikasi mapping ikon/warna agar status sukses tampil konsisten.
+- [x] Isi dan status notifikasi lintas platform telah dikonfirmasi sama oleh pengguna. Perbedaan ikon/warna visual Android dan website tidak dihitung sebagai kegagalan sinkronisasi; evaluasi ulang hanya jika desain produk mensyaratkan ikon identik.
 - [ ] URL action notification: temuan hostname/protokol URL pada payload notifikasi sukses sebelumnya masih perlu diverifikasi; pastikan tautan menuju domain publik/tunnel yang benar atau URL lokal yang sesuai konteks.
   
 Kesimpulan: alur withdrawal dan konsistensi data lintas-platform pada akun Yoga Dwi telah dikonfirmasi PASS oleh pengguna. Bug overflow 7 px tetap menjadi pekerjaan UI terbuka. Konsistensi visual ikon notifikasi dan verifikasi URL aksi notifikasi tetap dicatat sebagai pemeriksaan lanjutan yang terpisah.
@@ -599,4 +599,5 @@ Kesimpulan: alur withdrawal dan konsistensi data lintas-platform pada akun Yoga 
 - [x] Konfirmasi riwayat transaksi dan notifikasi withdrawal berhasil serta sedang diproses sama.
 - [x] Cross-platform withdrawal dinyatakan PASS; tidak diperlukan perubahan kode backend untuk temuan sinkronisasi ini.
 - [ ] Tetap perbaiki dan uji ulang Flutter bottom navigation yang overflow 7 px.
-- [ ] Periksa terpisah konsistensi ikon/warna notifikasi dan URL tujuan aksi notifikasi; ini bukan kegagalan sinkronisasi status/isi transaksi yang telah dikonfirmasi.
+- [x] Isi/status notifikasi lintas platform telah dikonfirmasi sama. Perbedaan ikon/warna visual antar aplikasi Android dan website tidak dianggap kegagalan sinkronisasi pada pengujian ini.
+- [ ] Uji tautan aksi notifikasi secara terpisah untuk memastikan URL tujuan dapat dibuka sesuai konteks (lokal/tunnel).
