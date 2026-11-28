@@ -5,6 +5,7 @@
 > **Terakhir diperbarui:** 2026-11-28  
 > **Repository:** https://github.com/yods77/Clipkeo  
 > **Branch kerja:** `fix/security-authentication`  
+> **Commit terbaru terkonfirmasi:** `7d31dd4` — `Fix campaign image URLs on Android`  
 > **Aturan penting:** jangan merge ke `main` tanpa instruksi eksplisit dari pemilik proyek.
 
 ---
@@ -881,3 +882,77 @@ Temuan review kode yang perlu diperbaiki sebelum menganggap deposit Publisher-on
 - Buat regression tests: Publisher dapat membuat deposit; Clipper mendapat 403 pada GET form dan POST store; tidak ada invoice eksternal maupun transaksi deposit untuk Clipper.
 
 Status: [x] alur bisnis diklarifikasi; [x] reward approval teridentifikasi sebagai mekanisme kredit wallet Clipper; [ ] backend authorization Publisher-only perlu diperbaiki dan diuji; [ ] lanjutkan tes withdrawal setelah saldo Clipper masuk dari reward campaign.
+
+## 21. Pembaruan 2026-11-28 — Notifikasi Deposit Publisher dan Perbaikan Gambar Campaign
+
+Bagian ini adalah handoff terbaru setelah pengujian deposit Publisher dan perbaikan media campaign. Gunakan bagian ini sebagai posisi kerja terkini; catatan sebelumnya tetap dipertahankan sebagai riwayat dan konteks.
+
+### A. Status Git terbaru
+- Repository: `yods77/Clipkeo`.
+- Branch kerja: `fix/security-authentication`; branch `main` tidak diubah dan tidak boleh di-merge tanpa persetujuan eksplisit.
+- Commit terbaru yang dikonfirmasi pada branch: `7d31dd48ad2f2fedfabbff8bb27c7794e19a6c82` (`7d31dd4`) — `Fix campaign image URLs on Android`.
+- Commit `7d31dd4` berhasil di-push ke `origin/fix/security-authentication` setelah commit merge notifikasi deposit `8219465`.
+- Dua file yang masuk pada commit `7d31dd4`: `clipkeo app/lib/config.dart` dan `clipkeo app/lib/screens/job_detail_screen.dart`.
+- Sebelum commit, `git status --short` hanya menunjukkan dua file tersebut. `git diff --check` dan `git diff --cached --check` tidak menghasilkan temuan. Push berhasil; jalankan `git status -sb` pada awal sesi berikutnya untuk memastikan working tree dan remote tetap sinkron.
+
+### B. Deposit Publisher — webhook dan notifikasi Admin
+- Branch `feat/admin-deposit-notifications` telah digabung ke `fix/security-authentication` melalui merge commit `8219465`.
+- File yang berubah dalam feature merge: `app/Http/Controllers/NotificationController.php`, `app/Http/Controllers/WebhookController.php`, `app/Notifications/AdminActivityNotification.php`, `app/Notifications/FinancialStatusNotification.php`, `resources/views/emails/deposit.blade.php`, dan `tests/Feature/DepositWebhookAdminNotificationTest.php`.
+- Feature test dijalankan dengan `php artisan test --filter=DepositWebhookAdminNotificationTest`: **2 tests passed, 14 assertions**. Test mencakup notifikasi kepada semua Admin untuk deposit Publisher PAID dan tidak mengirim notifikasi Admin kepada user non-Admin.
+- Tunnel ngrok aktif meneruskan `POST /webhooks/xendit` ke Laravel. Xendit melaporkan webhook berhasil dikirim; ngrok mencatat HTTP 200. Log Laravel memperlihatkan event `status=PAID` dan `Deposit Sukses` dengan reference deposit.
+- Website Admin menampilkan notifikasi “Deposit Publisher Berhasil”. Pengguna mengonfirmasi bahwa klik notifikasi membuka transaksi deposit yang benar.
+- Pengguna juga menerima email resmi dari Xendit untuk deposit berhasil. Ini adalah email Xendit, bukan bukti bahwa email internal Clipkeo telah diterima.
+- Riwayat error yang ditemukan sebelum feature merge: FCM gagal karena user/token kosong dan template invoice lama memanggil `format()` pada nilai tanggal yang berupa string. Feature branch menambahkan template email deposit khusus dan test; pengiriman email internal/FCM tetap perlu diverifikasi tersendiri bila dibutuhkan.
+
+Keputusan role/platform yang sudah dikonfirmasi:
+- Admin menggunakan website untuk seluruh akses administrasi.
+- Aplikasi Android pada tahap ini digunakan khusus oleh Clipper; jangan menambahkan ketergantungan alur Admin pada aplikasi Android.
+- Deposit hanya untuk role `publisher`. Clipper tidak boleh deposit langsung.
+- Untuk memperoleh saldo Clipper, gunakan alur bisnis Publisher deposit → buat/fund campaign → Clipper submit → Publisher approve → reward `bounty_prize` masuk ke wallet Clipper.
+- Peringatan penting: audit sebelumnya menemukan route `/deposits/create` dan `POST /deposits` serta `DepositController` belum menunjukkan pemeriksaan role Publisher di sisi server. Menyembunyikan menu di UI tidak cukup. Authorization server-side dan regression tests masih menjadi pekerjaan terbuka; jangan menyatakan deposit Publisher-only sudah aman di backend sampai tes 403 untuk Clipper lulus.
+
+### C. Perbaikan gambar campaign — penyebab dan hasil
+**Penyebab yang ditemukan**
+- Gambar tetap ada pada `storage/app/public/bounty-images`; file tidak hilang.
+- `public/storage` sebelumnya merupakan direktori biasa yang kosong, bukan symbolic link/junction Laravel.
+- `clipsquad.test` mengembalikan HTTP 404 untuk file gambar. Apache Laragon hanya menampilkan VirtualHost default `00-default.conf` dengan Main DocumentRoot `C:/laragon/www`; tidak ditemukan VirtualHost khusus Clipkeo. Konfigurasi Apache tidak diubah.
+- Akses melalui Laravel development server dan ngrok berhasil; hambatan akses Android berikutnya berasal dari IP laptop lama `192.168.1.102` yang sudah tidak aktif.
+
+**Perbaikan lokal yang dilakukan**
+- Direktori kosong `public/storage` dihapus tanpa recursive delete, lalu `php artisan storage:link` membuat junction `public/storage` → `storage/app/public`.
+- Verifikasi junction: `Attributes` mencakup `ReparsePoint`, `LinkType` adalah `Junction`, dan target adalah `E:\Clipkeo\clipkeo web\storage\app\public`.
+- `Test-Path` untuk file contoh melalui `public/storage/bounty-images` menghasilkan `True`.
+- Gambar berhasil diuji melalui `http://127.0.0.1:8000/storage/bounty-images/...` dengan HTTP 200; pengujian URL ngrok juga HTTP 200.
+- Laravel dijalankan dengan `php artisan serve --host=0.0.0.0 --port=8000`; `netstat` menunjukkan `0.0.0.0:8000` LISTENING.
+- `ipconfig` menunjukkan IP Ethernet laptop pada saat pengujian adalah `192.168.18.3` (gateway `192.168.18.1`). HP kemudian dapat membuka gambar melalui IP tersebut pada jaringan lokal.
+- `public/storage` adalah junction lokal Windows dan tidak menjadi pengganti migration/source code. Pada mesin/environment baru, buat ulang dengan `php artisan storage:link` setelah disk public dan direktori storage tersedia.
+
+**Perubahan Flutter yang di-commit**
+- `clipkeo app/lib/config.dart`: `ipAddress` development diubah ke `192.168.18.3`; `fixImageUrl()` sekarang menangani URL absolut dari `localhost`, `127.0.0.1`, `clipsquad.test`, IP lama, dan IP LAN saat ini; path relatif `storage/...` tidak diberi prefix storage dua kali; URL eksternal seperti Cloudinary dipertahankan.
+- `clipkeo app/lib/screens/job_detail_screen.dart`: nilai `image_path` dipakai sebagai path mentah dan kemudian diproses melalui `AppConfig.fixImageUrl()`, bukan digabung dengan `AppConfig.baseUrl` yang mengandung `/api`. Fallback `image_url` dan `thumbnail_url` tetap tersedia.
+- `dart format lib/config.dart lib/screens/job_detail_screen.dart` berhasil. `flutter analyze` dilaporkan tanpa error/warning dan 224 info lint.
+- APK debug dipasang ke HP melalui Wireless Debugging. Karena `adb install` tanpa target sempat menghasilkan `more than one device/emulator`, instalasi dilanjutkan dengan memilih serial perangkat secara eksplisit melalui `adb -s <serial> install -r <apk>`; tidak perlu USB.
+- Pengguna mengonfirmasi semua gambar bounty/campaign sudah tampil pada website dan aplikasi Android.
+- Commit dan push perubahan: `7d31dd4 Fix campaign image URLs on Android`.
+
+### D. Runbook pengembangan lokal saat ini
+1. Jalankan Laravel dari folder `E:\Clipkeo\clipkeo web`:
+   `php artisan serve --host=0.0.0.0 --port=8000`
+2. Untuk akses dari HP, gunakan IP LAN laptop yang aktif. Nilai terakhir saat pengujian adalah `192.168.18.3`, tetapi selalu cek ulang dengan `ipconfig` karena IP dapat berubah.
+3. HP dan laptop harus berada pada jaringan yang saling dapat menjangkau. Jika koneksi gagal, periksa IP aktif, `netstat -ano | findstr ":8000"`, Windows Firewall inbound TCP 8000, dan client isolation/guest Wi-Fi; jangan menonaktifkan seluruh firewall.
+4. Untuk webhook Xendit eksternal, jalankan `ngrok http 8000`, gunakan hostname HTTPS yang tampil pada sesi aktif, dan pastikan terminal ngrok tetap hidup. Jangan mengandalkan hostname tunnel dari sesi lama.
+5. Untuk Wireless Debugging: periksa `adb devices -l`; jika lebih dari satu device terdaftar, pilih serial HP yang benar menggunakan `adb -s <serial> install -r <path-apk>`.
+6. `192.168.18.3` adalah alamat development lokal, bukan alamat produksi. Jangan merilis build produksi dengan IP LAN hard-coded; pindahkan host/port ke konfigurasi build/environment (dev/staging/production) dan verifikasi Google Sign-In serta API setelah perubahan.
+7. Jangan mengubah Apache Laragon hanya untuk memperbaiki gambar saat ini. `clipsquad.test` masih mengarah ke VirtualHost default Laragon; Laravel dev server port 8000 adalah jalur yang sudah diuji.
+
+### E. Pekerjaan terbuka dan urutan aman berikutnya
+- [ ] Tambahkan pemeriksaan role Publisher di sisi server untuk GET form dan POST deposit; buat test Publisher boleh, Clipper 403, dan tidak ada invoice/transaction untuk Clipper.
+- [ ] Ganti IP hard-coded pada Flutter dengan konfigurasi environment/build flavor sebelum staging/production; audit juga `apiBaseUrl` lama (`$baseUrl/clipsquad/public/api`) secara terpisah sebelum mengubahnya.
+- [ ] Uji upload gambar campaign baru oleh Publisher dari awal sampai gambar terlihat di website dan Android; hasil yang sudah dikonfirmasi adalah gambar bounty tampil pada kedua platform.
+- [ ] Lanjutkan pengujian withdrawal gagal di Xendit Test Mode setelah Clipper menerima saldo reward melalui alur campaign Publisher. Verifikasi callback, status request, ledger, refund penuh tepat satu kali, saldo, notifikasi, dan riwayat; jangan edit saldo/ledger manual.
+- [ ] Perbaiki Flutter bottom navigation yang sebelumnya menampilkan `BOTTOM OVERFLOWED BY 7.0 PIXELS`.
+- [ ] Verifikasi URL action/deep link notifikasi yang sebelumnya tercatat memakai hostname/protokol ngrok yang mungkin tidak sesuai; gunakan URL environment yang benar, bukan tunnel lama.
+- [ ] Bila email internal Clipkeo atau FCM push dibutuhkan, uji delivery terpisah. Jangan menyamakan email resmi Xendit dengan email aplikasi; FCM sebelumnya gagal karena user/token kosong.
+- [ ] Jalankan `git status -sb`, `git log -1 --oneline`, dan `git fetch origin` pada awal sesi berikutnya. Pertahankan semua pekerjaan di `fix/security-authentication`; jangan merge ke `main` tanpa instruksi eksplisit.
+
+Aturan keselamatan tetap berlaku: jangan menaruh `.env`, secret Xendit, callback token, password, PIN, atau kredensial ke Git/dokumen/chat; jangan membuat payout baru, approve ulang, refund manual, atau mengubah saldo/ledger secara manual saat menguji callback yang sudah ada.
