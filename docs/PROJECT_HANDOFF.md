@@ -535,3 +535,41 @@ Publisher wallet Rp0 konsisten dengan dana campaign Rp1.000.000 yang telah di-ho
 
 ### Next test
 Buat submission baru dengan status `pending` pada campaign aktif yang memiliki budget cukup, biarkan Publisher tidak memprosesnya, tunggu minimal 5 menit sesuai aturan monitoring, lalu uji Admin Takeover pada submission baru tersebut. Jangan gunakan ulang Submission #1 yang sudah approved dan dibayar.
+
+
+## 18. Pembaruan 2026-11-28 — Pengujian Manual Admin Takeover Lulus
+
+### Skenario yang diuji
+Pengguna melaporkan seluruh langkah berikut berhasil pada environment lokal Clipkeo dengan akun Clipper kedua yang dibuat khusus untuk pengujian takeover:
+
+- [x] Clipper kedua mengirim submission ke campaign aktif.
+- [x] Publisher membiarkan submission tetap berstatus pending.
+- [x] Menunggu minimal 5 menit sesuai aturan monitoring.
+- [x] Admin membuka halaman Review & Takeover dan menemukan submission tersebut.
+- [x] Admin mengambil alih proses dan menyetujui submission.
+- [x] Saldo, reward, dan transaksi diperiksa; pengguna melaporkan tidak terjadi pembayaran/pencatatan reward ganda.
+
+### Hasil dan batas bukti
+- Skenario Admin Takeover manual dinyatakan lulus berdasarkan laporan pengguna pada 2026-11-28.
+- Pengujian ini mencakup jalur moderasi alternatif ketika Publisher tidak memproses submission tepat waktu.
+- Pengguna tidak menyertakan output SQL, submission ID, nominal reward, ID transaksi, atau saldo sebelum/sesudah pada laporan ini. Karena itu, handoff tidak mengarang angka atau identifier. Simpan hasil query/database berikutnya jika diperlukan sebagai bukti audit yang dapat direproduksi.
+- Jangan mengulang approval pada submission yang sudah final. Gunakan submission baru untuk regression test berikutnya.
+
+### Status checklist
+- [x] Pembuatan dan penggunaan akun Clipper kedua untuk skenario takeover.
+- [x] Submission tetap pending saat Publisher tidak memproses.
+- [x] Batas tunggu minimal 5 menit terpenuhi.
+- [x] Admin menemukan dan mengambil alih submission.
+- [x] Approval oleh Admin berhasil.
+- [x] Pemeriksaan saldo, reward, dan transaksi dilaporkan berhasil tanpa payout ganda.
+
+### Pengujian berikutnya — Withdrawal Web/API dan Xendit
+Lanjutkan ke pengujian lifecycle withdrawal secara terkontrol menggunakan sandbox/mock atau environment test:
+1. Ajukan withdrawal dari aplikasi/API dan dari website, masing-masing dengan data uji terpisah.
+2. Pastikan saldo didebit satu kali, request dan ledger memiliki referensi yang konsisten, dan retry tidak membuat withdrawal/debit kedua.
+3. Uji approval Admin dengan idempotency key yang stabil; timeout ambigu harus direkonsiliasi sebelum transfer dicoba ulang.
+4. Simulasikan webhook Xendit completed, failed, duplikat, dan urutan callback yang terlambat.
+5. Untuk kegagalan transfer Xendit, verifikasi kebijakan Clipkeo: seluruh biaya admin 10% dikembalikan kepada pengguna, satu kali saja. Pastikan jumlah refund, saldo akhir, status fee, dan ledger sesuai.
+6. Pastikan callback failed yang datang setelah status completed tidak membatalkan pembayaran atau mengembalikan saldo lagi.
+
+**Batasan:** jangan melakukan transfer uang sungguhan atau mengubah tarif/kebijakan finansial tanpa persetujuan eksplisit. Catat test yang benar-benar dijalankan beserta hasil aktual; skenario sandbox/mock tidak boleh disebut sebagai transfer produksi.
