@@ -308,6 +308,7 @@ Tambahkan entri terbaru di bawah ini setiap kali roadmap berubah atau keputusan 
 | 2026-11-27 | Roadmap awal dibuat dari pemeriksaan struktur Flutter/Laravel, route, controller, model, dan UI Admin pada branch `fix/security-authentication`. | Baseline; perlu validasi dengan working tree lokal dan pengujian end-to-end |
 | 2026-11-27 | Financial/security hardening committed: canonical ledger types, atomic campaign refund and web/API withdrawal debits, server-side withdrawal PIN, webhook idempotency, route hardening, and regression tests. | Code committed to `fix/security-authentication`; tests and Flutter analysis not yet executed. Next: Xendit approval idempotency and one withdrawal-ledger lifecycle. |
 | 2026-11-27 | Added per-user API withdrawal idempotency, persisted Flutter retry keys, pending-attempt recovery across token renewal/logout, current withdrawal status in result UI, and backend/mobile regression tests. | Committed to `fix/security-authentication`; implementation tests pending local execution. API now requires `Idempotency-Key`, so backend and updated mobile app must be released together. |
+| 2026-11-28 | Manual end-to-end Admin Takeover test with a second Clipper account: submission stayed pending for at least 5 minutes, appeared in Admin Review & Takeover, was approved, and balance/reward/ledger were checked for duplicate payout. | All 6 steps reported successful by the user. Exact submission ID and monetary figures were not included; detailed financial reconciliation evidence should be retained for future regression checks. |
 
 
 ## 12. Progress Tracker — 2026-11-27
@@ -349,7 +350,7 @@ Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, 
 - [x] Admin berhasil login dan membuka halaman Admin.
 - [x] Aksi Tolak & Refund pada campaign uji ID 1 pernah berhasil satu kali; jangan diulang.
 - [~] Route hardening dan regression tests otorisasi Admin sudah ditambahkan ke branch; audit route dan test versi terbaru masih diperlukan.
-- [ ] Uji Admin Takeover dan pastikan tidak menghasilkan payout ganda.
+- [x] Uji manual end-to-end Admin Takeover dengan akun Clipper kedua: submission pending, Publisher tidak memproses, tunggu minimal 5 menit, Admin Review & Takeover, approve, lalu periksa saldo/reward/ledger untuk mencegah payout ganda (dilaporkan berhasil pengguna pada 2026-11-28).
 - [ ] Uji persetujuan deposit/withdrawal, audit trail, dan pembatasan akses role biasa.
 
 ### C. Test automation dan kualitas aplikasi
@@ -380,7 +381,7 @@ Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, 
 1. [x] Rekonsiliasi Submission #1 selesai: Campaign #2 `reward_amount` Rp1.000.000, `remaining_budget` Rp950.000; Clipper ID 1 wallet Rp50.000; Publisher ID 2 wallet Rp0; transaksi bounty_prize ID 4 dan 5 masing-masing Rp50.000 dan sukses.
 2. [~] Audit semantik `payout_status`: nilai `partial` pada Submission #1 berasal dari kondisi sisa budget campaign (`remaining_budget > 100`), bukan karena reward Rp50.000 belum dibayarkan. Jangan ubah aturan reward; evaluasi penamaan/status UI secara terpisah.
 3. [ ] Pastikan migration penambah `approved_at` ikut tercatat dalam repository dan migration video_id berstatus benar pada database lokal.
-4. [ ] Buat submission uji baru yang tetap pending untuk Admin Takeover; tunggu minimal 5 menit sesuai aturan monitoring. Jangan mengulang approve atau refund pada data uji yang sudah final.
-5. [ ] Lanjutkan ke withdrawal Web/API dan simulasi webhook Xendit; gunakan data staging/test, bukan transfer uang sungguhan tanpa persetujuan.
+4. [x] Admin Takeover selesai diuji manual pada 2026-11-28 dengan akun Clipper kedua; keenam langkah dilaporkan berhasil, termasuk pemeriksaan saldo, reward, dan transaksi agar tidak ada payout ganda. Jangan mengulang approval pada submission yang sudah final.
+5. [ ] Lanjutkan pengujian withdrawal Web/API dan simulasi webhook Xendit pada sandbox/mock atau environment test; pastikan jika transfer Xendit gagal, seluruh fee admin 10% dikembalikan sesuai kebijakan Clipkeo. Jangan gunakan transfer uang sungguhan tanpa persetujuan.
 
 **Aturan pencatatan:** status [x] hanya boleh dipakai untuk pekerjaan yang benar-benar telah diuji/dibuktikan. Implementasi yang baru ada di branch tetapi belum dijalankan tetap [~]. Hasil lokal yang belum dilaporkan tidak boleh dianggap lulus.
