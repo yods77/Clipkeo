@@ -65,6 +65,12 @@ class NotificationController extends Controller
 
             // --- KASUS D: KEUANGAN (Deposit) ---
             // Arahkan ke halaman detail Deposit
+            case 'deposit_success':
+                return redirect()->route('wallet.index', [
+                    'search' => $notification->data['reference_id'] ?? '',
+                    'type' => 'deposit',
+                ]);
+
             case 'deposit':
                 return redirect()->route('wallet.index');
                 break;
