@@ -464,3 +464,14 @@ Status: tunnel online, tetapi endpoint dan callback Xendit belum terverifikasi. 
 - [ ] Setelah endpoint terverifikasi, baru perbarui callback URL Xendit dan resend callback untuk disbursement yang sama.
 
 Status: tunnel sebelumnya offline saat request; callback Xendit belum diuji ulang. Jangan membuat payout baru atau mengubah saldo/ledger secara manual.
+
+
+### Verifikasi route webhook lokal
+- [x] POST lokal ke `http://127.0.0.1:8000/webhooks/xendit` dengan body kosong tanpa callback token menghasilkan `HTTP 401 Unauthorized` dan JSON `{"message":"Unauthorized"}`.
+- [x] Konfirmasi: request mencapai Laravel dan mekanisme penolakan request tanpa token aktif.
+- [ ] Jalankan kembali ngrok dan pastikan sesi berstatus `online`.
+- [ ] POST ke hostname HTTPS ngrok yang aktif; harapkan 401 JSON dari Laravel, bukan error offline ngrok.
+- [ ] Setelah akses publik terverifikasi, periksa callback URL di Xendit dan resend callback pada disbursement uji yang sama.
+- [ ] Konfirmasi callback sah menghasilkan status akhir dan riwayat transaksi/notifikasi yang benar.
+
+Status: route lokal terverifikasi; akses publik dan pemrosesan callback Xendit yang sah masih menunggu. Tidak ada payout baru atau perubahan saldo manual.
