@@ -1,0 +1,674 @@
+# Clipkeo — Product Vision, UX Strategy & Development Roadmap
+
+> Dokumen strategi produk dan backlog pengembangan jangka menengah/panjang. Dokumen ini melengkapi `docs/PROJECT_HANDOFF.md` yang menyimpan posisi teknis terakhir.
+>
+> **Tanggal baseline:** 2026-11-27  
+> **Repository:** https://github.com/yods77/Clipkeo  
+> **Branch acuan:** `fix/security-authentication`  
+> **Pembaruan terakhir:** 2026-11-28 — commit branch `7d31dd4`  
+> **Baseline kode yang ditinjau:** commit `36d668e84a32b77adaf129e1d4dfa58150d39175`  
+> **Penting:** item roadmap adalah rekomendasi/temuan audit, bukan klaim bahwa fitur sudah tersedia atau sudah diuji. Verifikasi ulang kode dan perilaku aktual sebelum implementasi.
+
+---
+
+## 1. Arah produk
+
+Clipkeo dapat diposisikan sebagai marketplace campaign video pendek yang mempertemukan:
+
+- **Publisher/Brand:** membuat campaign, menetapkan anggaran, platform, target/peraturan, dan hadiah; memantau submission serta hasil campaign.
+- **Clipper/Creator:** menemukan campaign, membuat konten video, mengirim tautan dan bukti analytics, memperoleh hadiah, serta menarik saldo.
+- **Administrator/Operations:** menjaga kualitas campaign dan submission, memproses deposit/withdrawal, menangani laporan, menjaga keamanan, dan memastikan keuangan dapat direkonsiliasi.
+
+Tujuan produk bukan hanya membuat semua menu tersedia. Pengguna harus selalu memahami:
+1. Apa langkah berikutnya?
+2. Apa syarat dan konsekuensinya?
+3. Apakah tindakan berhasil?
+4. Kapan status akan berubah?
+5. Siapa yang harus dihubungi jika ada masalah?
+
+**Prinsip utama:** sederhana bagi pengguna, terukur bagi Publisher, efisien bagi Admin, dan dapat diaudit untuk seluruh proses yang menyentuh uang atau moderasi.
+
+## 2. Peta kemampuan yang terlihat pada kode saat ini
+
+Daftar berikut berasal dari pemeriksaan kode branch acuan. Keberadaan kode tidak otomatis berarti setiap alur sudah lulus pengujian end-to-end.
+
+### Flutter mobile app
+File/screen yang terlihat:
+- Onboarding, welcome, login, register, OTP, lupa password, setup PIN.
+- Dashboard, pencarian campaign, detail campaign.
+- Form submission dengan tautan video dan upload bukti analytics.
+- Riwayat misi dengan tab pending/approved/rejected.
+- Wallet, metode payout, input dan hasil withdrawal.
+- Profile, linked social account, notification, leaderboard.
+
+### Laravel web/backend
+Route dan controller yang terlihat:
+- Landing page, login Google, profile, linked accounts, dashboard.
+- Publisher campaign/bounty, daftar submission, approval/rejection, analytics.
+- Deposit, withdrawal, payout methods, wallet/transactions, invoice, notification.
+- Admin dashboard, manajemen user, moderasi campaign, monitoring submission, admin takeover, deposit/withdrawal approval, analytics.
+- API autentikasi, campaign, profile, wallet, notification, leaderboard, submission.
+- Xendit webhook dan upload bukti analytics ke layanan penyimpanan eksternal.
+
+### Integrasi yang terlihat
+- Google Sign-In.
+- Laravel Sanctum untuk API mobile.
+- Xendit untuk proses pembayaran/penarikan.
+- Cloudinary untuk media/bukti analytics.
+- Firebase Cloud Messaging untuk notifikasi push.
+- Platform konten yang dikenali oleh alur submission: TikTok, Instagram, dan YouTube.
+
+## 3. Temuan audit awal yang perlu diprioritaskan
+
+Temuan ini adalah pembacaan kode branch acuan, bukan hasil eksploitasi atau pengujian produksi. Konfirmasi ulang pada branch dan working tree terbaru sebelum mengubah kode.
+
+### P0 — Integritas saldo dan transaksi
+1. Database memiliki ENUM transaksi: `deposit`, `withdrawal`, `bounty_hold`, `bounty_prize`, `bounty_refund`, `platform_fee`. Beberapa controller dan wallet view masih memakai istilah lama seperti `reward`, `payout`, dan `refund`. Seluruh pencatatan, filter, label, dan arah nominal perlu distandarkan.
+2. Alur withdrawal dari Flutter API dan website memakai controller yang berbeda. API wallet mencatat transaksi ketika request diajukan; website mencatat transaksi lain ketika admin memproses pencairan. Telusuri apakah terjadi dua baris ledger untuk satu withdrawal, pastikan satu lifecycle dan satu sumber kebenaran.
+3. API wallet dashboard mengirim `service_fee_pct = 0.05`, sedangkan controller withdrawal yang diperiksa menghitung fee 10%. Pastikan fee yang ditampilkan, disetujui secara bisnis, dan benar-benar dipotong selalu sama. Jangan mengubah tarif tanpa keputusan pemilik produk.
+4. Withdrawal dan perubahan saldo harus atomik, menggunakan database transaction dan row locking yang tepat agar dua request bersamaan tidak menyebabkan saldo negatif atau pencairan ganda.
+5. Webhook Xendit harus idempotent untuk setiap status/event. Verifikasi signature/token, transisi status yang sah, pencocokan reference, dan refund satu kali. Deposit sudah memiliki pemeriksaan status sukses; withdrawal perlu pengujian duplikasi dan transisi status yang setara.
+6. Buat satu lifecycle transaksi yang jelas: requested → processing → success/failed/reversed (sesuaikan domain). Jangan mengubah status final secara sembarang.
+7. Pertahankan unique reference ID yang sudah ditambahkan melalui migration. Tambahkan idempotency key untuk aksi yang dapat dikirim ulang, terutama deposit, withdrawal, approval, dan payout.
+8. Uji konsistensi wallet balance terhadap ledger dan saldo dana campaign yang di-hold. Rencanakan ledger debit/kredit yang immutable sebagai evolusi terkontrol; jangan mengganti skema finansial tanpa rekonsiliasi dan migration plan.
+
+### P0 — Security dan kontrol akses
+1. Audit semua route admin dengan `php artisan route:list`: setiap aksi approve/reject, takeover, moderasi, manajemen user, dan transaksi harus berada di middleware/Policy admin yang tepat. Kode route yang diperiksa memiliki deklarasi approval/rejection withdrawal berulang; pastikan tidak ada route yang efektif tanpa middleware admin dan hapus duplikasi setelah test.
+2. Audit endpoint API berdasarkan role dan ownership. Pengguna hanya boleh membaca/mengubah resource miliknya; admin-only action harus memiliki role/policy server-side, bukan sekadar menyembunyikan tombol UI.
+3. Endpoint submission menerima URL video dari pengguna dan melakukan resolusi redirect untuk link pendek. Terapkan allowlist domain, pembatasan redirect, blokir IP privat/loopback/link-local pada setiap hop, timeout, serta perlindungan SSRF/DNS rebinding.
+4. Validasi file analytics berdasarkan MIME/content, ukuran, ekstensi, dan izin file. Pertimbangkan private object storage dan signed URL untuk bukti yang tidak boleh publik.
+5. Pastikan PIN memiliki throttling, lockout bertahap, audit event, dan tidak pernah masuk log. Terapkan rate limit pada autentikasi, reset OTP, upload, dan aksi keuangan.
+6. Verifikasi webhook dengan secret yang benar dan jangan mencatat token, credential, data rekening lengkap, atau informasi sensitif ke log.
+7. Audit penggunaan environment/configuration: tidak ada secret di repository atau client app. URL API dan Google client configuration harus memakai environment/build flavor, bukan IP lokal hard-coded untuk build produksi.
+
+### P1 — Kualitas pengalaman pengguna
+1. Flutter NotificationScreen memiliki aksi “tandai semua dibaca” yang pada kode acuan hanya mengubah state lokal; sambungkan ke endpoint read-all dan sinkronkan unread count.
+2. Beberapa service Flutter mengembalikan list/map kosong saat request gagal. Bedakan kondisi loading, data kosong, gagal jaringan, sesi habis, dan server error agar saldo Rp0 tidak disalahartikan sebagai kegagalan API.
+3. Samakan istilah status antara aplikasi, website, API, dan database. Contoh: campaign pending review, active, rejected, completed; submission pending, approved/partial/paid, rejected; withdrawal pending, processing, completed, rejected.
+4. Tambahkan pagination/infinite scroll dan filter yang konsisten untuk daftar besar. API BountyController sudah memakai pagination 10 item; pertahankan kontrak pagination untuk layar campaign.
+5. Pastikan seluruh form memberi validasi dekat dengan field, ringkasan biaya/fee sebelum konfirmasi, progress upload, retry yang aman, dan pencegahan double-tap/double-submit.
+
+### P1 — Konsistensi API
+- `GET /api/campaigns` terlihat dideklarasikan lebih dari sekali (closure dan controller). Pastikan route aktif yang dimaksud, hapus definisi duplikat, dan lindungi kontrak API dengan tests.
+- Dokumentasikan request/response, status code, pagination, error format, dan versi API. Hindari mengubah response Flutter tanpa migrasi client yang terencana.
+
+## 4. Pengalaman ideal per peran
+
+### A. Clipper / Creator — mobile-first
+**Alur ideal:** daftar/login → onboarding singkat → lengkapi profil dan akun sosial → temukan campaign → pahami aturan/hadiah → submit → pantau status dan views → terima reward → tarik saldo.
+
+Rekomendasi:
+- Home yang langsung menampilkan campaign relevan, saldo/reward, status submission terakhir, dan satu CTA utama.
+- Pencarian dengan kategori, platform (TikTok/Instagram/YouTube), jenis reward, deadline, budget tersisa, dan kata kunci.
+- Campaign card memperlihatkan brand, platform, estimasi reward/range, deadline, sisa budget, dan syarat penting tanpa membuka detail.
+- Detail campaign memiliki ringkasan “cara ikut”, aturan, contoh konten, target views/tier, estimasi reward, deadline, dan peringatan kelayakan.
+- Checklist sebelum submit: akun sosial yang tepat, tautan valid, video milik sendiri, bukti analytics, dan campaign masih aktif.
+- Upload dengan progress, retry, dan draft sementara jika jaringan putus.
+- Timeline submission: terkirim → sedang ditinjau → disetujui/ditolak → pembayaran/akumulasi reward. Sertakan alasan penolakan yang spesifik dan jalur banding jika kebijakan produk mengizinkan.
+- Wallet memisahkan saldo tersedia, saldo tertahan, pendapatan, biaya, withdrawal, dan status pencairan.
+- Tampilkan fee, nominal bersih diterima, rekening tujuan, dan estimasi waktu sebelum PIN/konfirmasi akhir.
+- Riwayat transaksi dapat difilter dan setiap item punya detail/reference yang bisa disalin.
+- Notifikasi yang dapat diatur per kategori; deep link langsung ke campaign/submission/transaksi terkait.
+- Pusat bantuan dengan FAQ, panduan bukti analytics, dan tiket bantuan.
+
+### B. Publisher / Brand — web-first, mobile-friendly
+**Alur ideal:** onboarding brand → isi profil → buat campaign → lihat simulasi biaya/budget → deposit/hold dana → moderasi campaign → terima submission → approve/reject dengan alasan → pantau performa → campaign selesai dan laporan.
+
+Rekomendasi:
+- Campaign creation wizard bertahap: tujuan, platform, brief, syarat, budget, strategi reward, deadline, jumlah pemenang.
+- Preview campaign seperti yang akan dilihat Clipper sebelum publish.
+- Kalkulator budget: estimasi jumlah creator/hasil, tier payout, biaya platform, saldo yang akan di-hold, dan sisa dana.
+- Template campaign agar Publisher tidak mengisi brief dari nol setiap kali.
+- Dashboard campaign: views, submission, approval rate, spend, cost per result, remaining budget, deadline, dan performa per platform.
+- Submission inbox dengan filter status, platform, views, waktu, dan risiko; bulk approve hanya untuk kasus yang aman dan harus memiliki preview serta konfirmasi.
+- Alasan reject terstruktur agar Clipper mendapat feedback yang jelas.
+- Notifikasi ketika campaign disetujui, submission masuk, budget hampir habis, atau campaign selesai.
+- Export laporan CSV/PDF untuk rekonsiliasi internal.
+- Riwayat deposit, invoice, dan penggunaan budget per campaign.
+
+### C. Administrator / Operations — efisiensi dan audit
+Modul yang terlihat saat ini sudah mencakup dashboard, user management, campaign moderation, monitoring submission, takeover, dan operasi deposit/withdrawal. Pengembangan berikutnya harus membuat semuanya menjadi satu alur kerja yang dapat diprioritaskan.
+
+Rekomendasi:
+- **Unified Operations Inbox:** satu antrean untuk campaign review, submission dispute/flag, deposit, withdrawal, laporan user, dan tiket bantuan.
+- Filter cepat: status, umur antrean, nominal, campaign, platform, user, risiko, dan penanggung jawab.
+- SLA/aging indicator: item yang paling lama menunggu dan yang mendekati batas layanan.
+- Detail case dengan semua bukti, riwayat perubahan, percakapan, saldo/ledger terkait, dan keputusan sebelumnya dalam satu layar.
+- Bulk actions untuk operasi non-finansial yang risikonya rendah; tampilkan preview, jumlah item, alasan, dan hasil per item. Untuk transfer/keputusan finansial besar, gunakan maker-checker (pembuat dan penyetuju berbeda).
+- Role-based access control: Super Admin, Finance, Moderator, Support, Analyst. Batasi data dan aksi sesuai kebutuhan kerja.
+- Audit log yang append-only: siapa melakukan apa, kapan, dari mana, alasan, nilai sebelum/sesudah, dan correlation/reference ID.
+- User 360: profil, status verifikasi, campaign, submission, transaksi, laporan, riwayat tindakan, catatan support, dan status banding.
+- Alat suspend/unsuspend dengan alasan, durasi, dan notifikasi. Hindari hard delete untuk data yang berkaitan dengan keuangan/audit.
+- Rekonsiliasi harian: saldo wallet, dana hold campaign, deposit gateway, withdrawal gateway, fee, refund, dan selisih.
+- Export terbatas berdasarkan role, dengan masking data rekening dan jejak unduhan.
+- Dashboard kesehatan sistem: error API, antrean gagal, webhook gagal, upload gagal, dan pembayaran yang macet.
+
+## 5. Prinsip UI/UX dan design system
+
+### Prinsip lintas aplikasi
+- Satu design system: warna status, tipografi, spacing, icon, button, field, modal, table, dan card konsisten antara halaman terkait.
+- Mobile-first untuk Clipper; web dashboard yang responsif untuk Publisher dan Admin.
+- Prioritaskan keterbacaan dan hierarki; animasi hanya membantu orientasi, bukan memperlambat pekerjaan.
+- Bahasa Indonesia yang sederhana dan konsisten; jelaskan istilah teknis seperti hold, payout, CPM, dan tier dengan tooltip/help.
+- Setiap layar harus punya empat keadaan: loading, success/data, empty, dan error/retry. Tambahkan offline/session-expired bila relevan.
+- Form panjang dibuat bertahap, menyimpan draft, menunjukkan progress, dan mencegah data hilang.
+- Tindakan berisiko (hapus, reject, transfer, refund) harus menampilkan dampak, alasan, dan konfirmasi yang jelas.
+- Aksesibilitas: kontras memadai, ukuran teks terbaca, target sentuh memadai, label screen reader, dan tidak mengandalkan warna saja untuk status.
+- Konsisten pada format IDR, tanggal, zona waktu, angka views, dan format nama platform.
+
+### Checklist penerimaan UI
+- Pengguna baru dapat menyelesaikan tugas utama tanpa bantuan staf.
+- Status dan langkah selanjutnya dapat dipahami dalam sekali lihat.
+- Tidak ada tombol yang tampak aktif tetapi tidak melakukan aksi.
+- Kesalahan memberi solusi yang dapat dilakukan, bukan hanya “terjadi kesalahan”.
+- Aksi finansial menampilkan nilai bruto, fee, nilai bersih, dan tujuan.
+- Data kosong berbeda jelas dari data yang gagal dimuat.
+- Layout diuji pada ukuran layar kecil, tablet, dan desktop yang relevan.
+
+## 6. Arsitektur dan kesiapan skala
+
+**Rekomendasi awal:** pertahankan Laravel sebagai modular monolith + API dan Flutter sebagai client. Jangan buru-buru memecah menjadi microservices sebelum metrik menunjukkan kebutuhan.
+
+Area yang perlu disiapkan:
+1. **Domain boundaries:** Auth/Identity, Campaign, Submission/Moderation, Wallet/Ledger, Payments, Notifications, Analytics, Support/Admin.
+2. **Financial correctness:** satu service/domain layer untuk mutasi saldo; transaksi database, row lock, idempotency, immutable ledger, reconciliation, dan test concurrency.
+3. **API:** versioning, pagination, validation, resource DTO/transformer, consistent error envelope, rate limit, dan dokumentasi OpenAPI.
+4. **Database:** index untuk foreign key dan filter yang sering dipakai (status, user_id, campaign_id, created_at, reference); hindari query N+1; gunakan pagination dan query agregasi yang terukur.
+5. **Background jobs:** upload processing, notifikasi, email, webhook follow-up, report generation, dan analytics aggregation diproses melalui queue dengan retry/backoff dan dead-letter monitoring.
+6. **Media storage:** object storage terkelola, private proof, signed URL, thumbnail/transcoding bila diperlukan, retensi dan penghapusan terjadwal.
+7. **Cache:** kategori, campaign discovery, leaderboard, dan statistik yang aman di-cache dengan invalidation yang jelas. Jangan cache saldo final tanpa strategi konsistensi.
+8. **Observability:** structured logs, correlation ID, error tracking, latency, queue depth, webhook outcomes, payment reconciliation, crash reporting mobile, dan alert.
+9. **Delivery:** CI untuk PHP tests/static analysis dan Flutter analyze/test/build; staging environment; release checklist; backup otomatis; restore drill.
+10. **Security/privacy:** least privilege, secrets management, encryption in transit/at rest, retention policy, export/delete account workflow, privacy notice, consent, dan incident response.
+
+## 7. Tahapan roadmap yang disarankan
+
+Urutan ini adalah rekomendasi prioritas, bukan janji jadwal. Pekerjaan aktual ditentukan setelah audit branch terbaru dan keputusan bisnis.
+
+### Tahap 0 — Stabilitas, uang, dan keamanan (P0)
+- [ ] Rekonsiliasi transaksi ENUM dengan semua controller, query, Blade, API, dan Flutter.
+- [ ] Satukan lifecycle withdrawal web/API dan hilangkan transaksi ganda.
+- [ ] Putuskan satu tarif fee resmi dan samakan API, UI, invoice, serta perhitungan backend.
+- [ ] Uji deposit/withdrawal/webhook untuk retry, duplicate event, timeout, dan status tidak berurutan.
+- [ ] Pastikan mutasi saldo atomic, terkunci, dan idempotent.
+- [ ] Audit middleware/Policy seluruh route admin dan ownership seluruh API.
+- [ ] Bersihkan route duplikat setelah route:list dan regression test.
+- [ ] Audit SSRF pada redirect video link dan keamanan file upload.
+- [ ] Buat test keuangan dan otorisasi yang belum ada.
+- **Gate:** tidak ada saldo ganda/hilang, payout ganda, akses lintas user, atau endpoint admin yang dapat diakses role biasa dalam test.
+
+### Tahap 1 — Core user journey dan UX launch-ready (P1)
+- [ ] Uji onboarding end-to-end untuk Clipper dan Publisher.
+- [ ] Sempurnakan campaign discovery, filter, detail, dan aturan reward.
+- [ ] Sempurnakan submission upload/progress/retry/status/rejection reason.
+- [ ] Sempurnakan campaign creation wizard dan Publisher inbox.
+- [ ] Perbaiki notification read/read-all dan deep link.
+- [ ] Bedakan error, empty, loading, offline, dan session expired di Flutter.
+- [ ] Sempurnakan wallet statement dan preview fee/withdrawal.
+- [ ] Pusat bantuan/FAQ dan feedback.
+- **Gate:** pengguna baru dari kedua role dapat menyelesaikan alur utama tanpa intervensi admin, dengan semua edge case utama diuji.
+
+### Tahap 2 — Admin operations dan trust (P1/P2)
+- [ ] Unified operations inbox dengan filter, SLA, assignment, dan bulk action yang aman.
+- [ ] RBAC admin berdasarkan tugas.
+- [ ] Audit trail untuk keputusan moderasi dan keuangan.
+- [ ] User 360, report/appeal/dispute workflow, dan support tickets.
+- [ ] Rekonsiliasi harian dan export laporan.
+- [ ] Fraud/risk signals: duplicate video, account ownership, abnormal views, pola submission, dan pola rejection.
+- **Gate:** admin dapat memproses volume meningkat tanpa kehilangan jejak keputusan dan tanpa mengorbankan kontrol keuangan.
+
+### Tahap 3 — Scale dan reliability (P2)
+- [ ] CI/CD, staging, automated regression, dan release rollback plan.
+- [ ] Queue, retry, monitoring, alert, dan dead-letter handling.
+- [ ] Database/index/query review dan load test.
+- [ ] Backup otomatis dan uji pemulihan.
+- [ ] Private media storage, CDN, dan observability.
+- [ ] Crash/error analytics untuk app dan web.
+- **Gate:** sistem lulus target beban yang disepakati dan tim dapat mendeteksi serta memulihkan insiden.
+
+### Tahap 4 — Growth dan optimasi bisnis (P3)
+- [ ] Referral/creator invitation dengan anti-abuse.
+- [ ] Campaign templates dan rekomendasi campaign yang relevan.
+- [ ] Personalized campaign feed berdasarkan platform/minat/performa.
+- [ ] Publisher performance insights dan benchmark.
+- [ ] Gamification yang transparan dan tidak mendorong perilaku spam.
+- [ ] Program loyalitas/tiers setelah ekonomi reward tervalidasi.
+- **Gate:** fitur growth didasarkan pada data aktivasi, retention, repeat campaign, dan unit economics—bukan sekadar menambah menu.
+
+## 8. Metrik produk dan operasi
+
+Mulai ukur baseline sebelum menetapkan target angka.
+
+### Clipper
+- Registration → profile completion → linked account → first campaign view → first submission.
+- Submission success rate dan waktu dari submit sampai keputusan.
+- Persentase submission ditolak dan alasan dominan.
+- Waktu reward menjadi saldo tersedia dan waktu withdrawal selesai.
+- Retention creator 7/30 hari dan creator aktif bulanan.
+
+### Publisher
+- Registration → campaign created → deposit/hold → campaign approved → first submission.
+- Waktu campaign review dan waktu submission review.
+- Campaign completion rate, repeat campaign rate, spend, cost per result, dan remaining budget.
+- Publisher retention dan support contact rate.
+
+### Admin/Finance
+- Backlog dan median/P95 waiting time per queue.
+- Approval/rejection throughput per admin.
+- Webhook success/retry/failure rate.
+- Reconciliation difference, duplicate transaction, payout failure, dan refund time.
+- Fraud flags, false-positive rate, appeal overturn rate.
+
+### Platform
+- API availability, latency P50/P95/P99, error rate.
+- Mobile crash-free sessions, upload success, login success.
+- Queue age/failures, DB slow queries, storage usage, backup/restore success.
+
+## 9. Keputusan bisnis yang harus ditetapkan sebelum implementasi terkait
+
+Jangan menebak atau mengubah kebijakan ini hanya dari kode:
+- Tarif fee deposit/withdrawal/platform dan pihak yang menanggungnya.
+- Kapan budget dianggap terkunci, dapat dikembalikan, atau tidak dapat dikembalikan.
+- Formula reward CPM/tier, rounding, batas views, dan jadwal pembayaran.
+- SLA moderasi campaign dan submission.
+- Bukti analytics yang diterima dan kebijakan verifikasi tiap platform.
+- Kebijakan fraud, banding, suspend, dan dispute.
+- Kebutuhan verifikasi identitas/brand dan persyaratan kepatuhan pembayaran.
+- Kebijakan umur pengguna, privasi, retensi bukti, dan penghapusan akun.
+- Target pengguna, target transaksi, target beban serentak, dan anggaran infrastruktur.
+
+## 10. Cara AI harus bekerja saat melanjutkan proyek
+
+Saat percakapan baru dimulai, AI harus:
+
+1. Membaca `docs/PROJECT_HANDOFF.md` dan dokumen roadmap ini sebelum memberi saran teknis.
+2. Memeriksa branch, commit terbaru, file yang berubah, dan diff yang diberikan pengguna. Jangan menganggap working tree bersih.
+3. Membedakan tiga status: **sudah ada di kode**, **sudah diuji**, dan **baru rekomendasi**.
+4. Menjelaskan posisi terakhir dan risiko yang masih terbuka.
+5. Tetap memberikan rekomendasi strategis: minimal prioritas teknis terdekat dan satu peluang peningkatan UX/operasional yang relevan.
+6. Mengurutkan saran berdasarkan dampak pengguna, risiko uang/keamanan, effort, dan dependensi—bukan sekadar menambah fitur.
+7. Mengusulkan solusi yang sesuai arsitektur sekarang; hindari rewrite/microservices tanpa alasan terukur.
+8. Untuk perubahan, audit file terkait dan dampaknya lintas Flutter, API, web, database, dan admin sebelum mengedit.
+9. Sertakan acceptance criteria, test plan, dan risiko migrasi untuk setiap perubahan bermakna.
+10. Jangan menjalankan perubahan destruktif, menghapus data, mengubah tarif bisnis, atau merge ke `main` tanpa persetujuan eksplisit.
+11. Setelah pekerjaan selesai, perbarui handoff dengan file yang berubah, commit SHA, test yang benar-benar dijalankan, hasilnya, dan next steps.
+12. Jika hasil uji lokal belum diberikan, tandai belum diverifikasi; jangan mengklaim berhasil.
+
+### Prompt untuk percakapan baru
+
+> Lanjutkan Clipkeo dari repository https://github.com/yods77/Clipkeo. Baca `docs/PROJECT_HANDOFF.md` dan `docs/PRODUCT_ROADMAP.md` pada branch `fix/security-authentication`. Audit branch dan perubahan lokal terbaru sebelum mengubah kode. Lanjutkan pekerjaan terakhir, tetapi tetap bertindak sebagai partner product engineering: evaluasi UX Clipper, Publisher, Admin, keamanan, keuangan, skalabilitas, dan rekomendasikan prioritas pengembangan berikutnya. Bedakan fitur yang sudah ada, yang sudah diuji, dan yang baru berupa rekomendasi. Jangan merge ke `main`, jangan menghapus perubahan lokal, dan jangan mengubah kebijakan finansial tanpa persetujuan.
+
+---
+
+## 11. Catatan pembaruan
+
+Tambahkan entri terbaru di bawah ini setiap kali roadmap berubah atau keputusan prioritas dibuat.
+
+| Tanggal | Perubahan | Status |
+|---|---|---|
+| 2026-11-27 | Roadmap awal dibuat dari pemeriksaan struktur Flutter/Laravel, route, controller, model, dan UI Admin pada branch `fix/security-authentication`. | Baseline; perlu validasi dengan working tree lokal dan pengujian end-to-end |
+| 2026-11-27 | Financial/security hardening committed: canonical ledger types, atomic campaign refund and web/API withdrawal debits, server-side withdrawal PIN, webhook idempotency, route hardening, and regression tests. | Code committed to `fix/security-authentication`; tests and Flutter analysis not yet executed. Next: Xendit approval idempotency and one withdrawal-ledger lifecycle. |
+| 2026-11-27 | Added per-user API withdrawal idempotency, persisted Flutter retry keys, pending-attempt recovery across token renewal/logout, current withdrawal status in result UI, and backend/mobile regression tests. | Committed to `fix/security-authentication`; implementation tests pending local execution. API now requires `Idempotency-Key`, so backend and updated mobile app must be released together. |
+| 2026-11-28 | Manual end-to-end Admin Takeover test with a second Clipper account: submission stayed pending for at least 5 minutes, appeared in Admin Review & Takeover, was approved, and balance/reward/ledger were checked for duplicate payout. | All 6 steps reported successful by the user. Exact submission ID and monetary figures were not included; detailed financial reconciliation evidence should be retained for future regression checks. |
+
+
+## 12. Progress Tracker — 2026-11-27
+
+Checklist ini membedakan pekerjaan yang sudah dibuktikan lewat pengujian lokal, implementasi yang sudah ada tetapi masih menunggu verifikasi, dan pekerjaan yang belum dilakukan.
+
+**Legenda:** [x] selesai dan ada bukti; [~] implementasi/tes sebagian, belum menjadi gate lulus; [ ] belum selesai.
+
+### A. P0 — Financial Integrity & Security
+
+- [x] Perbaikan refund Admin untuk campaign uji ID 1: campaign ditolak, saldo Publisher kembali Rp1.000.000, dan satu transaksi `bounty_refund` tercatat. Jangan ulangi refund pada campaign uji tersebut.
+- [~] Normalisasi tipe ledger canonical (`bounty_prize`, `bounty_refund`, dan tipe ENUM lain) serta penyesuaian arah pemasukan/pengeluaran berdasarkan pemilik transaksi sudah ditambahkan ke branch; rekonsiliasi seluruh jalur dan wallet masih perlu diselesaikan.
+- [~] Refund campaign menggunakan transaksi database/row lock dan mengosongkan `remaining_budget` pada alur yang sudah diperbaiki; regression test lengkap masih perlu dijalankan setelah sinkronisasi lokal.
+- [~] Withdrawal PIN server-side, validasi ownership payout method, atomic debit, dan proteksi webhook idempotency sudah diimplementasikan pada branch; verifikasi menyeluruh pada environment lokal/staging masih diperlukan.
+- [~] API withdrawal idempotency per user dan retry recovery di Flutter sudah ditambahkan. Backend dan Flutter harus dirilis berpasangan karena API mewajibkan header `Idempotency-Key`; test pada versi kode terbaru masih harus dijalankan.
+- [ ] Idempotency approval transfer Xendit oleh Admin dan satu lifecycle ledger withdrawal yang konsisten untuk Web/API.
+- [~] Rekonsiliasi awal withdrawal: satu request ditolak dengan refund bruto penuh Rp50.000 dan satu request masih processing dengan ledger pending; callback sukses dan rekonsiliasi provider belum terbukti.
+- [ ] Audit menyeluruh SSRF pada resolver URL video, validasi file upload, webhook secret/signature, dan seluruh route/ownership API.
+- [ ] Menetapkan serta menguji satu kebijakan fee yang sama pada API, UI, invoice, dan backend; jangan mengubah tarif bisnis tanpa persetujuan.
+
+### B. P1 — Core User Journey
+
+**Clipper / Android**
+- [x] Instalasi aplikasi Android, Google Login, persistensi sesi, dashboard, profile, wallet kosong, dan halaman submissions pernah diuji dan dilaporkan berhasil.
+- [x] Submission #1 pada database lokal berstatus `approved`, memiliki 10.000 views, `last_paid_views=10000`, `prize_amount=Rp50.000`, dan `approved_at` terisi.
+- [~] Migration `video_id` telah ditambahkan ke branch untuk memperbaiki query submission; eksekusi migration dan pengujian ulang pada database lokal harus dicatat setelah diverifikasi.
+- [~] Upload bukti analytics dan tampilan submission pada alur Publisher/Admin telah dilaporkan diuji; retry upload, error state, dan seluruh edge case belum dinyatakan lulus.
+- [ ] Rekonsiliasi saldo Clipper dan transaksi reward untuk Submission #1.
+- [ ] Uji pencarian/filter/detail campaign dengan data campaign aktif yang tersedia.
+- [~] Uji awal withdrawal manual: request ID 2 pada Clipper ID 1 berstatus processing, saldo telah ditahan, dan ledger withdrawal/fee masih pending; kanal Android atau website belum teridentifikasi. Pengujian Android dan website terpisah, retry, dan penyelesaian webhook masih terbuka.
+
+**Publisher / Web**
+- [x] Publisher berhasil login dan membuat campaign uji; validasi field wajib berjalan.
+- [x] Alur review Publisher dan reward Submission #1: status approved, saldo Clipper bertambah Rp50.000, dua transaksi ledger bounty_prize masing-masing Rp50.000 sukses, dan remaining budget Campaign #2 berkurang menjadi Rp950.000.
+- [ ] Uji campaign creation, hold budget, approval/rejection, pembatalan/refund, dan laporan performa secara end-to-end dengan data uji baru yang aman.
+- [ ] Uji filter/inbox submission, alasan penolakan, dan seluruh state loading/empty/error.
+
+**Admin / Web**
+- [x] Admin berhasil login dan membuka halaman Admin.
+- [x] Aksi Tolak & Refund pada campaign uji ID 1 pernah berhasil satu kali; jangan diulang.
+- [~] Route hardening dan regression tests otorisasi Admin sudah ditambahkan ke branch; audit route dan test versi terbaru masih diperlukan.
+- [x] Uji manual end-to-end Admin Takeover dengan akun Clipper kedua: submission pending, Publisher tidak memproses, tunggu minimal 5 menit, Admin Review & Takeover, approve, lalu periksa saldo/reward/ledger untuk mencegah payout ganda (dilaporkan berhasil pengguna pada 2026-11-28).
+- [~] Uji Admin pada dua withdrawal lokal: satu request ditolak dan refund penuh Rp50.000 tercatat success; satu request disetujui dan masih menunggu konfirmasi Xendit. Audit trail, penyelesaian webhook, dan pembatasan akses role biasa masih perlu diverifikasi.
+
+### C. Test automation dan kualitas aplikasi
+
+- [x] Baseline Laravel sebelumnya: 64 tests passed dan 249 assertions sebelum implementasi API withdrawal idempotency terbaru.
+- [~] Test baru untuk withdrawal approval/webhook, ownership, PIN, normalisasi tipe transaksi, API idempotency, dan schema submission sudah ditambahkan/diubah di branch; jalankan ulang seluruh suite pada HEAD terbaru.
+- [ ] Jalankan seluruh `php artisan test`, lint PHP yang berubah, `flutter analyze`, `flutter test`, dan `flutter build apk --debug`; catat output aktual.
+- [ ] Uji staging untuk timeout setelah commit, retry dengan idempotency key sama, key/payload berbeda, PIN salah/benar, webhook duplikat, dan callback status tidak berurutan.
+
+### D. P2 — Scale & Reliability
+
+- [ ] CI/CD dan staging environment dengan release/rollback checklist.
+- [ ] Load test API dan database, query/index review, serta uji konkurensi mutasi saldo.
+- [ ] Backup otomatis dan restore drill.
+- [ ] Monitoring API, queue, webhook, upload, dan crash/error Flutter.
+- [ ] Private media storage, signed URL, dan kebijakan retensi bukti analytics.
+
+### E. P3 — Growth
+
+- [ ] Referral dan creator invitation dengan anti-abuse.
+- [ ] Campaign templates dan rekomendasi campaign untuk Publisher.
+- [ ] Personalized campaign feed.
+- [ ] Publisher performance insights dan benchmark.
+- [ ] Gamification dan loyalty setelah unit economics tervalidasi.
+
+### F. Pengujian aktif berikutnya
+
+1. [x] Rekonsiliasi Submission #1 selesai: Campaign #2 `reward_amount` Rp1.000.000, `remaining_budget` Rp950.000; Clipper ID 1 wallet Rp50.000; Publisher ID 2 wallet Rp0; transaksi bounty_prize ID 4 dan 5 masing-masing Rp50.000 dan sukses.
+2. [~] Audit semantik `payout_status`: nilai `partial` pada Submission #1 berasal dari kondisi sisa budget campaign (`remaining_budget > 100`), bukan karena reward Rp50.000 belum dibayarkan. Jangan ubah aturan reward; evaluasi penamaan/status UI secara terpisah.
+3. [ ] Pastikan migration penambah `approved_at` ikut tercatat dalam repository dan migration video_id berstatus benar pada database lokal.
+4. [x] Admin Takeover selesai diuji manual pada 2026-11-28 dengan akun Clipper kedua; keenam langkah dilaporkan berhasil, termasuk pemeriksaan saldo, reward, dan transaksi agar tidak ada payout ganda. Jangan mengulang approval pada submission yang sudah final.
+5. [ ] Lanjutkan pengujian withdrawal Web/API dan simulasi webhook Xendit pada sandbox/mock atau environment test; pastikan jika transfer Xendit gagal, seluruh fee admin 10% dikembalikan sesuai kebijakan Clipkeo. Jangan gunakan transfer uang sungguhan tanpa persetujuan.
+
+**Aturan pencatatan:** status [x] hanya boleh dipakai untuk pekerjaan yang benar-benar telah diuji/dibuktikan. Implementasi yang baru ada di branch tetapi belum dijalankan tetap [~]. Hasil lokal yang belum dilaporkan tidak boleh dianggap lulus.
+
+
+## 13. Catatan Pengujian Withdrawal — 2026-11-28
+
+Pengguna melaporkan dua permintaan withdrawal telah masuk ke halaman Admin. Output query read-only database lokal menunjukkan:
+
+| Withdrawal | Clipper | Nominal bruto | Fee 10% | Bersih | Status lokal | Hasil |
+|---|---|---:|---:|---:|---|---|
+| #1 | ID 4 — Clipper Takeover Test | Rp50.000 | Rp5.000 | Rp45.000 | `rejected` | Refund Rp50.000 tercatat `success`; withdrawal dan fee `failed` |
+| #2 | ID 1 — Yoga Dwi | Rp50.000 | Rp5.000 | Rp45.000 | `processing` | Withdrawal Rp45.000 dan fee Rp5.000 masih `pending`; notifikasi berhasil belum diterima |
+
+### Interpretasi
+- Jalur penolakan dan pengembalian dana penuh mendapat bukti database untuk withdrawal #1. Refund mengembalikan nominal bruto Rp50.000, termasuk biaya admin.
+- Withdrawal #2 belum dapat dinyatakan berhasil. Status `processing` dan ledger `pending` berarti penyelesaian transfer belum terbukti pada database yang dilaporkan.
+- Implementasi menunggu webhook Xendit berstatus `COMPLETED` untuk menyelesaikan ledger dan mengirim notifikasi keberhasilan. Webhook `FAILED` memicu refund penuh.
+- Kanal asal kedua request (Android atau website) tidak disebutkan. Jangan menandai pengujian Android atau website selesai sampai masing-masing diuji dan dicatat terpisah.
+
+### Checklist pengujian
+- [x] Dua withdrawal masuk ke proses Admin.
+- [x] Satu withdrawal ditolak; refund bruto penuh tercatat satu kali.
+- [~] Satu withdrawal disetujui dan berada pada status processing; belum ada bukti callback completed.
+- [ ] Cocokkan reference ID dan provider ID request #2 dengan disbursement pada dashboard Xendit.
+- [ ] Periksa log callback dan pastikan webhook lolos validasi `x-callback-token`.
+- [ ] Verifikasi request #2 menjadi completed, ledger withdrawal dan fee menjadi success, `paid_at` terisi, serta notifikasi terkirim.
+- [ ] Uji withdrawal Android secara terpisah.
+- [ ] Uji withdrawal website secara terpisah.
+- [ ] Uji callback duplikat/terlambat dan rekonsiliasi tanpa transfer atau refund ganda.
+
+**Gate berikutnya:** jangan mengulang approval, menghapus ledger, atau membuat request pengganti untuk withdrawal #2 sebelum status provider diketahui. Semua bukti harus berasal dari output database, log, dan dashboard Xendit; status lokal `processing` bukan bukti bahwa rekening penerima sudah dikreditkan.
+
+
+## 14. Xendit Completed, Webhook 404 melalui ngrok — 2026-11-28
+
+Screenshot detail Xendit mengonfirmasi withdrawal request ID 2 (external ID `WD-local-2`) dengan nominal bersih IDR 45.000 telah berstatus `Completed` pada 28 Nov 2026 pukul 09:00:03 GMT+7. Callback ke domain ngrok lama gagal dengan HTTP 404 dan halaman error HTML ngrok (endpoint offline/ERR_NGROK_3200). Dengan demikian, transfer provider selesai; ketidaksinkronan database lokal terjadi karena callback tidak mencapai Laravel.
+
+### Prioritas pemulihan
+- [x] Konfirmasi status provider `COMPLETED` melalui screenshot dashboard.
+- [x] Identifikasi callback gagal pada tunnel ngrok lama (HTTP 404).
+- [ ] Jalankan aplikasi lokal dan tunnel ngrok yang aktif pada port/virtual host yang benar.
+- [ ] Perbarui callback URL Xendit ke domain ngrok aktif dengan path `/webhooks/xendit`.
+- [ ] Pastikan callback verification token cocok dengan `XENDIT_VERIFICATION_TOKEN` Laravel.
+- [ ] Kirim ulang callback yang gagal melalui tombol **Kirim Ulang** pada dashboard Xendit; jangan membuat disbursement baru.
+- [ ] Pastikan request ID 2 `completed`, ledger withdrawal dan platform fee `success`, `paid_at` terisi, dan notifikasi berhasil terkirim.
+
+**Financial safety gate:** status transfer sudah `COMPLETED`; jangan approve ulang, mengirim transfer baru, refund, atau mengubah saldo/ledger manual. Pulihkan pencatatan lokal melalui callback resmi untuk disbursement yang sama.
+
+
+### Kendala setup lokal: ngrok CLI belum dikenali
+- [x] Identifikasi penyebab perintah `ngrok` tidak berjalan: PowerShell menghasilkan `CommandNotFoundException` untuk `ngrok http 8000` dan `ngrok http 80`.
+- [x] Konfirmasi alamat Laravel lokal: `http://127.0.0.1:8000`.
+- [ ] Instal ngrok CLI Windows melalui sumber resmi; metode WinGet yang dicantumkan ngrok: `winget install ngrok -s msstore`.
+- [ ] Verifikasi instalasi dengan `ngrok version`, konfigurasi authtoken, lalu jalankan `ngrok http 8000`.
+- [ ] Perbarui URL webhook Xendit ke domain ngrok aktif dengan path `/webhooks/xendit`.
+- [ ] Resend callback untuk disbursement COMPLETED yang sama dan verifikasi ledger serta notifikasi.
+
+Status saat ini: blocker setup tunnel; belum ada callback baru yang diterima. Jangan mengulang transfer atau mengubah saldo/ledger secara manual.
+
+
+### Pembaruan tunnel ngrok — online
+- [x] Screenshot menunjukkan ngrok v3.39.13 berstatus `online`.
+- [x] Tunnel meneruskan `https://moist-smothered-miriam.ngrok-free.dev` ke `http://localhost:8000`, sesuai alamat Laravel lokal pengguna.
+- [x] Pemeriksaan kode: route `POST /webhooks/xendit` terdaftar di `routes/web.php`; controller mengembalikan JSON HTTP 401 `Unauthorized` saat header `x-callback-token` tidak ada/tidak cocok.
+- [ ] Uji endpoint dari PowerShell kedua; hasil yang diharapkan adalah HTTP 401 JSON Laravel (bukan 404 HTML ngrok).
+- [ ] Perbarui callback URL Xendit ke `https://moist-smothered-miriam.ngrok-free.dev/webhooks/xendit` dan pastikan verification token cocok.
+- [ ] Resend callback untuk disbursement COMPLETED yang sama; verifikasi ledger dan notifikasi lokal.
+
+Status: tunnel online, tetapi endpoint dan callback Xendit belum terverifikasi. Jangan mengirim transfer baru atau mengubah saldo/ledger manual.
+
+
+### Withdrawal webhook — diagnosis tunnel ngrok
+- [x] Percobaan POST ke hostname ngrok lama menghasilkan HTTP 404 HTML `ERR_NGROK_3200` (endpoint offline).
+- [x] Diagnosis: request belum mencapai Laravel; belum ada hasil uji route maupun callback-token.
+- [ ] Pastikan Laravel server tetap berjalan pada port 8000.
+- [ ] Jalankan kembali `ngrok http 8000` dan pertahankan terminal tetap terbuka.
+- [ ] Gunakan hostname HTTPS yang benar-benar tampil pada sesi ngrok aktif.
+- [ ] Uji endpoint lokal dan publik; hasil yang diharapkan adalah HTTP 401 JSON dari `WebhookController` saat header `x-callback-token` tidak diberikan.
+- [ ] Setelah endpoint terverifikasi, baru perbarui callback URL Xendit dan resend callback untuk disbursement yang sama.
+
+Status: tunnel sebelumnya offline saat request; callback Xendit belum diuji ulang. Jangan membuat payout baru atau mengubah saldo/ledger secara manual.
+
+
+### Verifikasi route webhook lokal
+- [x] POST lokal ke `http://127.0.0.1:8000/webhooks/xendit` dengan body kosong tanpa callback token menghasilkan `HTTP 401 Unauthorized` dan JSON `{"message":"Unauthorized"}`.
+- [x] Konfirmasi: request mencapai Laravel dan mekanisme penolakan request tanpa token aktif.
+- [ ] Jalankan kembali ngrok dan pastikan sesi berstatus `online`.
+- [ ] POST ke hostname HTTPS ngrok yang aktif; harapkan 401 JSON dari Laravel, bukan error offline ngrok.
+- [ ] Setelah akses publik terverifikasi, periksa callback URL di Xendit dan resend callback pada disbursement uji yang sama.
+- [ ] Konfirmasi callback sah menghasilkan status akhir dan riwayat transaksi/notifikasi yang benar.
+
+Status: route lokal terverifikasi; akses publik dan pemrosesan callback Xendit yang sah masih menunggu. Tidak ada payout baru atau perubahan saldo manual.
+
+
+### Webhook Xendit — verifikasi publik berhasil
+- [x] Uji POST lokal tanpa `x-callback-token` ke `/webhooks/xendit` menghasilkan HTTP 401 JSON `Unauthorized`.
+- [x] Uji POST publik melalui ngrok ke `https://moiest-smotheredly-miriam.ngrok-free.dev/webhooks/xendit` juga menghasilkan HTTP 401 JSON `Unauthorized`.
+- [x] Konfirmasi: tunnel publik aktif pada saat tes dan request mencapai Laravel; ini bukan error ngrok.
+- [ ] Pada Xendit Test Mode, atur URL callback produk Disbursements ke `https://moiest-smotheredly-miriam.ngrok-free.dev/webhooks/xendit`.
+- [ ] Pastikan verification token Xendit Test Mode cocok dengan `XENDIT_VERIFICATION_TOKEN` di `.env` lokal (jangan tampilkan token ke chat/log).
+- [ ] Simpan callback URL. Jika `.env` diubah, restart Laravel server.
+- [ ] Dari Log Webhook, resend hanya callback gagal untuk external ID `WD-local-2` (disbursement yang sudah COMPLETED); jangan buat withdrawal/disbursement baru.
+- [ ] Verifikasi status withdrawal #2, ledger withdrawal dan platform fee, saldo, notifikasi, serta log Laravel setelah callback diterima.
+
+Status: route lokal dan publik terverifikasi; callback Disbursement Xendit untuk `WD-local-2` sudah mencapai endpoint dan Laravel mengembalikan `Withdrawal Processed`. Verifikasi status akhir database, ledger, saldo, dan notifikasi masih berjalan. Financial safety gate tetap berlaku: tidak ada payout baru, approval ulang, refund, atau perubahan saldo/ledger manual.
+
+
+### Koreksi konfigurasi callback: legacy Disbursement
+- [x] Screenshot Webhooks menunjukkan URL ngrok sebelumnya dipasang pada **Payment Links → Invoices paid**, bukan webhook withdrawal.
+- [x] Riwayat Payment Links memberi HTTP 200 dengan pesan `Ignored - Kode tidak dikenali`; event ini tidak menguji alur withdrawal.
+- [x] Audit source code: Clipkeo menggunakan endpoint legacy Xendit `/disbursements` dan controller menerima payload `external_id` + `status` untuk status `COMPLETED`/ `FAILED`.
+- [x] Dokumentasi resmi Xendit membedakan callback legacy `disbursement` dari webhook `payout` untuk Payouts V2 dan Payouts V3.
+- [ ] Klik **Ubah ke Versi Lama** pada halaman Webhooks Xendit.
+- [ ] Cari webhook **Disbursement** (Money-Out) pada versi lama dan pasang URL ngrok aktif pada event tersebut.
+- [ ] Pastikan Test Mode dan cocokkan token verifikasi callback Xendit dengan `XENDIT_VERIFICATION_TOKEN` lokal.
+- [ ] Resend hanya callback legacy Disbursement yang gagal untuk `WD-local-2` (sudah COMPLETED di Xendit).
+- [ ] Verifikasi status withdrawal, ledger withdrawal/platform fee, `paid_at`, saldo, notifikasi, dan log Laravel.
+
+Jangan mengonfigurasi Payouts V2/V3 untuk integrasi kode yang sekarang, dan jangan membuat transfer baru, approve ulang, refund, atau mengubah saldo/ledger manual.
+
+
+### Withdrawal webhook — konfigurasi legacy Disbursement
+- [x] Beralih dari tampilan webhook baru ke tampilan legacy Xendit berhasil; screenshot 28 Nov 2026 menunjukkan halaman legacy.
+- [x] Baris/daftar callback legacy Money-Out terlihat.
+- [ ] Pada baris **DISBURSEMENT** legacy (bukan Payouts V2/V3), pastikan URL persis `https://moiest-smotheredly-miriam.ngrok-free.dev/webhooks/xendit`.
+- [ ] Klik **Test dan Simpan** pada baris Disbursement tersebut.
+- [ ] Cocokkan verification token Xendit dengan `XENDIT_VERIFICATION_TOKEN` / `services.xendit.verification_token` di Laravel.
+- [ ] Verifikasi callback pada Webhook Log; resend hanya event Disbursement untuk withdrawal #2 / `WD-local-2` yang telah Completed di Xendit.
+- [ ] Pastikan withdrawal lokal completed, ledger withdrawal dan platform_fee tersinkron, `paid_at` terisi, notifikasi terkirim, dan tidak ada transaksi/refund/transfer ganda.
+
+Catatan implementasi: kode saat ini memakai legacy `POST /disbursements`; handler webhook memerlukan header `x-callback-token`, serta `external_id` dan `status` di level root. Jangan mengonfigurasi callback Payouts V2/V3 untuk alur ini.
+
+
+### Withdrawal — callback Disbursement mencapai Completed
+- [x] Xendit menampilkan pencairan `WD-local-2` sebesar IDR 45.000 dengan status **Completed**.
+- [x] Detail Callback menunjukkan event terbaru **Completed** pada 28 Nov 2026 09:46:04 (GMT+7), sumber Otomatis, ke URL ngrok aktif.
+- [x] Dua percobaan callback sebelumnya terlihat **Failed** (09:15:50 dan 09:00:03).
+- [ ] Buka **Tampilkan Data Respon** pada event Completed terbaru; pastikan body `{"message":"Withdrawal Processed"}`, bukan respons ignored/invalid.
+- [ ] Verifikasi withdrawal request #2 / `WD-local-2` di database: status completed dan `paid_at` terisi.
+- [ ] Pastikan ledger withdrawal dan platform_fee masing-masing hanya satu kali, saldo konsisten, dan tidak ada refund ganda.
+- [ ] Pastikan notifikasi serta riwayat transaksi clipper menampilkan withdrawal berhasil.
+
+Catatan: callback delivery berstatus Completed belum dengan sendirinya membuktikan logika aplikasi memproses withdrawal; cek response body karena handler dapat merespons HTTP 200 untuk callback yang diabaikan.
+
+
+### Withdrawal — Laravel mengonfirmasi callback diproses
+- [x] Buka data respons event callback Xendit terbaru.
+- [x] Response body adalah `{"message":"Withdrawal Processed"}`; Laravel mengenali dan memproses callback sebagai withdrawal, bukan mengabaikannya.
+- [ ] Periksa database lokal untuk withdrawal #2 / `WD-local-2`: status final `completed` dan `paid_at` terisi.
+- [ ] Pastikan transaksi/ledger withdrawal dan platform fee masing-masing hanya satu kali dan status final sesuai.
+- [ ] Pastikan saldo clipper konsisten serta notifikasi dan riwayat transaksi menampilkan pencairan berhasil.
+
+Catatan: response `Withdrawal Processed` membuktikan handler aplikasi memproses callback, tetapi pemeriksaan database tetap diperlukan untuk memastikan seluruh efek finansial dan notifikasi tersimpan benar. Jangan resend callback, membuat payout baru, approve ulang, refund, atau mengubah saldo/ledger manual sebelum pemeriksaan selesai.
+
+
+### 28 Nov 2026 — Skema database withdrawal dan paid_at diverifikasi
+- [x] Struktur `withdrawal_requests` diverifikasi langsung dari database lokal: status memiliki enum `pending`, `processing`, `completed`, dan `rejected`; tabel ini tidak memiliki kolom `paid_at`.
+- [x] Struktur `transactions` diverifikasi: memiliki kolom `paid_at` dan `withdrawal_request_id` (unik) untuk menghubungkan ledger dengan withdrawal request.
+- [ ] Lanjutkan pemeriksaan data withdrawal request #2 / `WD-local-2`, transaksi yang terhubung, serta saldo clipper.
+
+Catatan koreksi pemeriksaan: waktu pembayaran harus dibaca dari baris `transactions.paid_at`, bukan dari `withdrawal_requests`. Jangan mengubah data keuangan secara manual.
+
+
+### 28 Nov 2026 — Withdrawal WD-local-2 terkonfirmasi completed di database
+- [x] Withdrawal request #2 untuk user/clipper #1 berstatus `completed`; nominal diminta Rp50.000, biaya admin Rp5.000, dan dana bersih Rp45.000.
+- [x] Transaksi #11 bertipe `withdrawal` tercatat tepat satu baris untuk `withdrawal_request_id=2`, referensi `WD-local-2`, nominal Rp45.000, status `success`, dan `paid_at=2026-11-28 09:45:52`.
+- [x] Saldo wallet clipper #1 setelah pencairan tercatat Rp0, konsisten dengan saldo awal Rp50.000 dikurangi permintaan Rp50.000.
+- [ ] Periksa seluruh transaksi `withdrawal`, `platform_fee`, dan `withdrawal_refund` milik clipper #1 untuk memastikan status biaya admin sudah sesuai dan tidak ada entri pending yang tertinggal.
+- [ ] Periksa notifikasi dan riwayat transaksi pada aplikasi Android serta website clipper.
+
+Kesimpulan: callback Xendit untuk `WD-local-2` diproses oleh Laravel dan withdrawal lokal telah tercatat completed/success. Namun verifikasi status ledger biaya admin serta tampilan notifikasi/riwayat di sisi pengguna masih terbuka. Jangan membuat withdrawal baru atau mengubah saldo/ledger manual sebelum pemeriksaan lanjutan selesai.
+
+
+### 28 Nov 2026 — Withdrawal ledger dan biaya admin terkonfirmasi
+- [x] Transaksi #11 milik clipper #1: `withdrawal` Rp45.000, status `success`, referensi `WD-local-2`, terhubung ke withdrawal request #2, dan `paid_at` terisi.
+- [x] Transaksi #12 milik clipper #1: `platform_fee` Rp5.000, status `success`, referensi `FEE-WD-2`, deskripsi biaya admin withdrawal 10%.
+- [x] Total ledger withdrawal dan biaya admin cocok dengan permintaan Rp50.000; kedua entri tercatat satu kali pada hasil query.
+- [x] Struktur tabel Laravel `notifications` tersedia: kolom `type`, `notifiable_type`, `notifiable_id`, `data`, `read_at`, dan timestamp.
+- [ ] Periksa baris notifikasi aktual untuk clipper #1 dan pastikan ada notifikasi withdrawal berhasil.
+- [ ] Periksa riwayat transaksi dan notifikasi pada aplikasi Android serta website.
+
+Kesimpulan sementara: pencatatan withdrawal dan biaya admin sudah konsisten di database. Keberadaan serta keterlihatan notifikasi pada sisi pengguna belum diverifikasi; struktur tabel bukan bukti bahwa notifikasi sudah dibuat atau ditampilkan.
+
+
+### 28 Nov 2026 — Notifikasi withdrawal berhasil tercatat di database
+- [x] Tabel `notifications` memuat notifikasi terbaru `FinancialStatusNotification` untuk user/clipper #1 dengan `type=withdrawal`, `status=success`, judul `Penarikan Dana Berhasil`, dan pesan bahwa Rp45.000 berhasil dikirim.
+- [x] Data notifikasi mencantumkan nominal `45000.00`, ikon `check-circle`, warna `green`, dan waktu dibuat 2026-11-28 09:45:55; `read_at` masih NULL sehingga notifikasi belum dibaca.
+- [x] Notifikasi withdrawal sebelumnya berstatus `pending` untuk Rp45.000 juga ada, dibuat 08:55:19.
+- [x] Riwayat transaksi user #1 memuat withdrawal Rp45.000 `success` (WD-local-2) dan platform fee Rp5.000 `success` (FEE-WD-2), masing-masing satu baris.
+- [ ] Verifikasi notifikasi sukses dan riwayat transaksi tampil di aplikasi Android dan website clipper.
+- [ ] Periksa URL pada data notifikasi sukses: tersimpan sebagai `http://moiest-smothered-miriam.ngrok-free.dev/wallet`, sedangkan hostname tunnel aktif yang dipakai pada pengujian publik adalah `moiest-smotheredly-miriam.ngrok-free.dev` dengan HTTPS. Kemungkinan URL notifikasi tidak sesuai host/protokol tunnel; uji klik dengan hati-hati dan jangan menganggap URL itu valid. Tentukan konfigurasi URL publik yang benar setelah pengujian UI.
+
+Kesimpulan: data notifikasi keberhasilan sudah dibuat di database, tetapi tampilan pada perangkat/web dan URL aksi notifikasi masih perlu diuji. Jangan mengubah status finansial atau membuat withdrawal baru.
+
+  
+### 28 Nov 2026 — Verifikasi tampilan withdrawal Android dan website
+- [x] Android: halaman Notifikasi menampilkan "Penarikan Dana Berhasil" dengan pesan dana Rp45.000 berhasil dikirim; notifikasi "Penarikan Dana Sedang Diproses" juga tetap tersedia.
+- [x] Android: Dompet Digital menampilkan saldo utama Rp0 dan riwayat withdrawal -Rp45.000, biaya admin -Rp5.000, serta reward campaign +Rp50.000.
+- [x] Website: Monitor Transaksi menampilkan saldo aktif Rp0, transaksi withdrawal -Rp45.000, admin fee -Rp5.000, refund withdrawal +Rp50.000, dan catatan withdrawal gagal.
+- [x] Website: dropdown notifikasi menampilkan pemberitahuan withdrawal berhasil dan sedang diproses.
+- [x] Verifikasi lanjutan akun Yoga Dwi: pengguna mengonfirmasi bahwa setelah login dengan akun yang sama pada website, referensi withdrawal, biaya admin, status transaksi, riwayat transaksi, dan notifikasi sama dengan aplikasi Android. Perbedaan akun/referensi pada screenshot awal telah ditindaklanjuti dengan pemeriksaan pada akun Yoga Dwi yang sama. Cross-platform withdrawal dinyatakan PASS berdasarkan pemeriksaan pengguna.
+- [ ] UI defect Android: screenshot memperlihatkan peringatan Flutter "BOTTOM OVERFLOWED BY 7.0 PIXELS" di area bottom navigation. Catat sebagai bug layout untuk diperbaiki dan diuji ulang pada ukuran layar perangkat.
+- [x] Isi dan status notifikasi lintas platform telah dikonfirmasi sama oleh pengguna. Perbedaan ikon/warna visual Android dan website tidak dihitung sebagai kegagalan sinkronisasi; evaluasi ulang hanya jika desain produk mensyaratkan ikon identik.
+- [ ] URL action notification: temuan hostname/protokol URL pada payload notifikasi sukses sebelumnya masih perlu diverifikasi; pastikan tautan menuju domain publik/tunnel yang benar atau URL lokal yang sesuai konteks.
+  
+Kesimpulan: alur withdrawal dan konsistensi data lintas-platform pada akun Yoga Dwi telah dikonfirmasi PASS oleh pengguna. Bug overflow 7 px tetap menjadi pekerjaan UI terbuka. Konsistensi visual ikon notifikasi dan verifikasi URL aksi notifikasi tetap dicatat sebagai pemeriksaan lanjutan yang terpisah.
+
+
+### 28 Nov 2026 — Konfirmasi sinkronisasi withdrawal akun Yoga Dwi
+- [x] Login ke website menggunakan akun Yoga Dwi yang sama dengan akun pada aplikasi Android.
+- [x] Konfirmasi referensi withdrawal sama pada kedua platform.
+- [x] Konfirmasi biaya admin sama (Rp5.000 dari nominal permintaan Rp50.000 / 10%).
+- [x] Konfirmasi status withdrawal completed/berhasil sama.
+- [x] Konfirmasi riwayat transaksi dan notifikasi withdrawal berhasil serta sedang diproses sama.
+- [x] Cross-platform withdrawal dinyatakan PASS; tidak diperlukan perubahan kode backend untuk temuan sinkronisasi ini.
+- [ ] Tetap perbaiki dan uji ulang Flutter bottom navigation yang overflow 7 px.
+- [x] Isi/status notifikasi lintas platform telah dikonfirmasi sama. Perbedaan ikon/warna visual antar aplikasi Android dan website tidak dianggap kegagalan sinkronisasi pada pengujian ini.
+- [ ] Uji tautan aksi notifikasi secara terpisah untuk memastikan URL tujuan dapat dibuka sesuai konteks (lokal/tunnel).
+
+
+### 28 Nov 2026 — Withdrawal: verifikasi penolakan, refund, dan kesiapan skenario gagal Xendit
+- [x] Pemeriksaan konfigurasi lokal: `XENDIT_SECRET_KEY` teridentifikasi sebagai Development Mode; `XENDIT_VERIFICATION_TOKEN` terkonfigurasi. Nilai rahasia tidak dicatat ke dokumen.
+- [x] Query transaksi user/clipper #4 (Clipper Takeover Test) menunjukkan transaksi #9 `withdrawal` Rp45.000 berstatus `failed`, `withdrawal_request_id=1`, referensi `WD-1`.
+- [x] Transaksi #10 `platform_fee` Rp5.000 untuk referensi `FEE-WD-1` berstatus `failed`.
+- [x] Transaksi #13 `withdrawal_refund` Rp50.000 berstatus `success`, referensi `WRF-WD-1`. Hanya satu baris refund ditemukan untuk user #4 pada hasil query.
+- [x] Referensi `WRF-WD-1` konsisten secara penamaan dengan withdrawal gagal `WD-1`; namun baris refund tidak memiliki `withdrawal_request_id` (NULL), sehingga hubungan ini terbukti melalui reference ID, bukan foreign-key link.
+- [x] Transaksi #14 untuk withdrawal request #3 mencatat payout Rp45.000 berstatus `success`, referensi `WD-local-3`; transaksi #15 mencatat biaya admin Rp5.000 berstatus `success`, referensi `FEE-WD-3`.
+- [x] Hasil ini mendukung bahwa skenario withdrawal gagal + fee gagal + refund penuh, serta satu withdrawal berhasil terpisah, sudah tercatat. Tidak ada refund kedua pada hasil query yang diperiksa.
+- [ ] Pengguna sedang menyiapkan saldo melalui alur deposit normal; belum ada bukti top-up baru selesai.
+- [ ] Setelah saldo tersedia, jalankan skenario Xendit Test Mode untuk disbursement gagal secara terkontrol; verifikasi status callback, refund penuh Rp50.000 tepat satu kali, fee tidak tertahan, saldo akhir, ledger, dan notifikasi pada Android serta website.
+- [ ] Jangan mengubah saldo/ledger manual dan jangan memakai rekening/payout produksi untuk pengujian.
+
+Catatan: bukti saat ini berasal dari query transaksi user #4 yang menampilkan enam baris (ID 7, 9, 10, 13, 14, 15) dan pemeriksaan `.env` yang hanya mengonfirmasi tipe key/token, bukan nilai rahasianya.
+
+
+### 28 Nov 2026 — Koreksi alur pendanaan saldo Clipper dan temuan otorisasi deposit
+- [x] Klarifikasi pemilik produk/pengguna: hanya akun dengan role `publisher` yang dapat melakukan deposit; akun `clipper` tidak melakukan deposit langsung.
+- [x] Jalur pengujian saldo Clipper yang sesuai: Publisher melakukan deposit ke wallet Publisher → Publisher membuat campaign dan mengunci/mengalokasikan budget → Clipper menyelesaikan submission → Publisher menyetujui submission → reward dikreditkan ke wallet Clipper.
+- [x] Pemeriksaan `SubmissionController::approve()` pada branch ini menunjukkan reward menambah `clipper.wallet_balance` dan membuat transaksi `bounty_prize` berstatus `success`.
+- [!] Temuan otorisasi yang perlu ditindaklanjuti: route `/deposits/create` dan `POST /deposits` berada di dalam middleware `auth`, `verified`, dan `has.pin`, tetapi tidak terlihat role middleware Publisher. `DepositController::create()` dan `store()` yang diperiksa juga belum memanggil pemeriksaan role Publisher. Menu yang disembunyikan pada UI saja tidak cukup untuk mencegah Clipper mengakses endpoint secara langsung.
+- [ ] Tambahkan server-side authorization `role === publisher` pada halaman dan proses deposit (serta endpoint terkait bila ada), kemudian buat feature test: Publisher boleh membuka/membuat deposit; Clipper menerima HTTP 403 dan tidak ada invoice/transaction deposit yang dibuat.
+- [ ] Untuk tes withdrawal Clipper Takeover Test, jangan minta akun Clipper deposit. Gunakan saldo reward campaign yang dibayarkan melalui alur Publisher → campaign → submission approval. Setelah reward masuk, baru uji withdrawal Xendit Test Mode.
+- [ ] Jangan edit wallet balance/ledger manual dan jangan melakukan deposit memakai akun Clipper.
+
+## 15. Progress Update — 2026-11-28: Admin Deposit Notifications & Campaign Image Delivery
+
+Bagian ini mencatat hasil yang sudah dikonfirmasi pengguna setelah progress tracker dan catatan Xendit sebelumnya. Status [x] berarti ada hasil pengujian atau konfirmasi pengguna; status [ ] tetap terbuka.
+
+### A. Deposit Publisher dan notifikasi Admin
+- [x] Fitur notifikasi deposit Admin dari branch `feat/admin-deposit-notifications` telah digabung ke `fix/security-authentication` melalui merge commit `8219465`.
+- [x] Perubahan mencakup `NotificationController`, `WebhookController`, `AdminActivityNotification`, `FinancialStatusNotification`, template email khusus `resources/views/emails/deposit.blade.php`, dan feature test `DepositWebhookAdminNotificationTest`.
+- [x] `php artisan test --filter=DepositWebhookAdminNotificationTest`: 2 tests passed, 14 assertions. Cakupan yang dilaporkan: deposit Publisher berstatus PAID memberi notifikasi kepada seluruh Admin; user non-Admin tidak menerima notifikasi Admin.
+- [x] Pengujian lokal melalui ngrok mencapai `POST /webhooks/xendit` dan mendapat HTTP 200. Log Laravel memperlihatkan webhook Xendit dengan `status=PAID` serta `Deposit Sukses` untuk reference deposit.
+- [x] Notifikasi in-app pada website Admin tampil sebagai “Deposit Publisher Berhasil”; pengguna mengonfirmasi bahwa saat diklik, halaman membuka transaksi deposit yang benar.
+- [x] Pengguna menerima email notifikasi resmi dari Xendit untuk deposit yang berhasil. Email resmi Xendit ini dibedakan dari email internal yang dikirim aplikasi Clipkeo.
+- [ ] Pengiriman email internal Clipkeo dan FCM/push tidak boleh dianggap lulus hanya berdasarkan email Xendit atau feature test. Log sebelumnya pernah menunjukkan FCM user/token kosong dan error format tanggal pada template invoice lama. Template deposit khusus sudah ditambahkan; verifikasi pengiriman email internal hanya jika memang menjadi kebutuhan operasional.
+
+Keputusan produk yang dikonfirmasi:
+- Admin mengakses seluruh fungsi administrasi melalui website; aplikasi Android saat ini digunakan khusus oleh Clipper.
+- Hanya role `publisher` yang boleh melakukan deposit. Clipper tidak melakukan deposit langsung; saldo Clipper berasal dari reward campaign yang disetujui Publisher.
+- Temuan authorization Publisher-only di server dari bagian sebelumnya tetap terbuka dan belum diselesaikan oleh pekerjaan notifikasi ini.
+
+### B. Perbaikan penyajian gambar campaign pada website dan Android
+- [x] File gambar campaign ditemukan tetap tersimpan di `storage/app/public/bounty-images`; file asli tidak hilang.
+- [x] Penyebab storage awal: `public/storage` adalah direktori biasa yang kosong, bukan link ke `storage/app/public`.
+- [x] Direktori kosong `public/storage` dihapus tanpa operasi recursive, lalu `php artisan storage:link` berhasil membuat junction Windows dari `public/storage` ke `storage/app/public`.
+- [x] Verifikasi `Get-Item public/storage` menunjukkan `Attributes: Directory, ReparsePoint`, `LinkType: Junction`, dan target `storage/app/public`. `Test-Path` untuk file contoh melalui `public/storage/bounty-images` menghasilkan `True`.
+- [x] Gambar berhasil disajikan oleh Laravel melalui `http://127.0.0.1:8000/storage/bounty-images/...` dengan HTTP 200; URL ngrok juga mengembalikan HTTP 200.
+- [x] `clipsquad.test` mengembalikan HTTP 404 untuk file gambar. Pemeriksaan Apache menunjukkan hanya VirtualHost default Laragon dan DocumentRoot `C:/laragon/www`; tidak ada VirtualHost khusus Clipkeo yang terkonfirmasi. Apache tidak diubah; pengujian lokal dilanjutkan melalui Laravel development server pada port 8000.
+- [x] Laravel dijalankan dengan `php artisan serve --host=0.0.0.0 --port=8000`; `netstat` menunjukkan `0.0.0.0:8000` berstatus LISTENING.
+- [x] Kegagalan akses awal dari HP disebabkan alamat lama `192.168.1.102` tidak lagi sesuai. `ipconfig` menunjukkan adapter Ethernet laptop menggunakan `192.168.18.3`; setelah HP dan laptop berada pada jaringan yang dapat saling menjangkau dan URL memakai IP terbaru, gambar berhasil dibuka dari Android.
+- [x] Flutter `lib/config.dart` diperbarui: IP dev saat ini `192.168.18.3`; `fixImageUrl()` menangani host lokal (`localhost`, `127.0.0.1`, `clipsquad.test`, dan IP lama/aktif), path relatif `storage/...`, serta mempertahankan URL eksternal seperti Cloudinary.
+- [x] Flutter `lib/screens/job_detail_screen.dart` diperbaiki agar `image_path` diteruskan sebagai path mentah ke helper `fixImageUrl()`, bukan dibentuk dengan `AppConfig.baseUrl` yang sudah mengandung `/api` (yang dapat menghasilkan `/api/storage/...`). Fallback `image_url`/`thumbnail_url` tetap dipertahankan.
+- [x] `dart format` dijalankan pada kedua file. `flutter analyze` dilaporkan tidak memiliki error atau warning; terdapat 224 temuan kategori info.
+- [x] APK debug berhasil dipasang ke HP melalui ADB Wireless Debugging. Saat ADB mendeteksi lebih dari satu perangkat, instalasi diarahkan dengan serial perangkat yang dipilih (`adb -s ...`), tanpa USB.
+- [x] Pengguna mengonfirmasi seluruh gambar bounty/campaign sudah tampil pada website dan aplikasi Android.
+- [x] Perubahan Flutter di-commit dan berhasil di-push ke `fix/security-authentication`: `7d31dd4` — `Fix campaign image URLs on Android`.
+
+### C. Batasan lokal dan pekerjaan lanjutan
+- [!] `192.168.18.3` adalah IP LAN laptop pada jaringan saat pengujian, bukan alamat produksi dan dapat berubah ketika jaringan berganti. Jangan gunakan nilai hard-coded ini untuk rilis publik.
+- [ ] Pindahkan konfigurasi host/port API dan storage ke konfigurasi build/environment yang terpisah untuk development, staging, dan production (misalnya `--dart-define` atau flavor); uji ulang Google Sign-In dan seluruh API setelah perubahan konfigurasi.
+- [ ] Uji upload campaign baru oleh Publisher dari awal sampai gambar tampil pada website dan Android; pengujian yang sudah dikonfirmasi saat ini membuktikan gambar bounty tampil pada kedua platform.
+- [ ] Tambahkan/selesaikan server-side authorization Publisher-only pada endpoint deposit dan regression tests Publisher boleh, Clipper 403; temuan pada bagian 14/riwayat sebelumnya masih berlaku.
+- [ ] Lanjutkan skenario withdrawal gagal Xendit setelah saldo Clipper diperoleh melalui Publisher → campaign → submission → approval reward. Jangan deposit memakai akun Clipper atau mengubah saldo/ledger manual.
+- [ ] Tindak lanjuti bug Flutter `BOTTOM OVERFLOWED BY 7.0 PIXELS` dan pemeriksaan URL aksi notifikasi yang telah dicatat pada bagian sebelumnya.
+- [ ] Audit `apiBaseUrl` lama (`$baseUrl/clipsquad/public/api`) secara terpisah terhadap route API aktif sebelum mengubahnya; jangan mencampurkannya dengan perbaikan gambar yang sudah lulus uji.
+
+Kesimpulan: notifikasi in-app deposit Publisher untuk Admin website dan tampilan gambar campaign pada website serta Android telah berhasil dikonfirmasi. Commit terbaru branch kerja adalah `7d31dd4`; branch `main` tidak diubah.

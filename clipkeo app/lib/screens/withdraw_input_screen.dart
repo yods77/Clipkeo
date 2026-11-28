@@ -32,6 +32,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
   // -- STATE VARIABLES --
   List<dynamic> payoutMethods = []; // 🔥 Deklarasikan ini
   bool _isSubmitting = false;
+  bool _hasPendingWithdrawalAttempt = false;
   final WalletService _walletService = WalletService();
   String inputAmount = "0";
   List<dynamic>? _localBankList;
@@ -78,19 +79,16 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
   }
 
   void _validatePinAndWithdraw() async {
-    print("👆 [UI] Memulai Validasi Withdraw...");
 
     // 1. VALIDASI DASAR (KODE LAMA KAMU)
-    double amount =
-        double.tryParse(inputAmount.replaceAll('.', '')) ??
-        0; // Tambah replaceAll biar aman
+    final double amount = double.tryParse(inputAmount) ?? 0;
     if (amount < 50000) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Minimal Rp 50.000")));
       return;
     }
-    if (amount > widget.maxBalance) {
+    if (amount > widget.maxBalance && !_hasPendingWithdrawalAttempt) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Saldo tidak cukup")));
@@ -113,30 +111,27 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
     );
 
     // 3. PANGGIL API CEK PIN
-    print("🚀 [LOGIC] Cek Status PIN ke Server...");
-    bool hasPin = await _walletService.checkPinStatus();
+    final hasPin = await _walletService.checkPinStatus();
 
+    // Hindari memakai BuildContext setelah async jika layar sudah ditutup.
+    if (!mounted) return;
     Navigator.pop(context); // Tutup Loading
-    print("🏁 [LOGIC] Status PIN: $hasPin");
 
     // 4. TENTUKAN ARAH
     if (hasPin) {
       // A. JIKA SUDAH PUNYA PIN -> Tampilkan Popup Input PIN (KODE LAMA KAMU)
-      print("➡️ [NAV] User punya PIN. Buka Dialog Input PIN.");
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => _PinInputDialog(
-          onPinSuccess: () {
-            // Kalau PIN Benar, Panggil fungsi withdraw ASLI
-            print("✅ [UI] PIN Benar. Eksekusi Withdraw!");
-            _handleWithdraw();
+          onPinSuccess: (pin) {
+            // Server tetap memverifikasi PIN saat request withdrawal diproses.
+            _handleWithdraw(pin);
           },
         ),
       );
     } else {
       // B. JIKA BELUM PUNYA PIN -> Buka Layar Setup PIN (KODE BARU)
-      print("➡️ [NAV] User BELUM punya PIN. Buka Setup PIN.");
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -166,18 +161,25 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 
     try {
       List<dynamic> freshData = await _walletService.getPayoutMethods();
+      final pendingAttempt =
+          await _walletService.getPendingWithdrawalAttempt();
 
       if (mounted) {
         setState(() {
-          _localBankList = freshData; // Isi data (Skeleton hilang otomatis)
+          _localBankList = freshData;
 
-          if (freshData.isNotEmpty) {
+          if (pendingAttempt != null) {
+            _hasPendingWithdrawalAttempt = true;
+            inputAmount = pendingAttempt['amount']?.toString() ?? '0';
+            selectedBankId = int.tryParse(
+              pendingAttempt['payout_method_id']?.toString() ?? '',
+            );
+          } else if (freshData.isNotEmpty) {
             selectedBankId = int.tryParse(freshData[0]['id'].toString());
           }
         });
       }
-    } catch (e) {
-      print("❌ Error: $e");
+    } catch (_) {
       if (mounted) {
         // Kalau error, anggap list kosong biar muncul pesan error (atau handling lain)
         setState(() => _localBankList = []);
@@ -200,20 +202,36 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 
   // -- LOGIC PERHITUNGAN --
   double get rawAmount => double.tryParse(inputAmount) ?? 0;
-  double get fee => rawAmount * 0.10;
+  double get fee => (rawAmount * 0.10).roundToDouble();
   double get finalAmount => rawAmount - fee;
 
   // -- INPUT KEYPAD --
   void onKeyTap(String value) {
+    if (_hasPendingWithdrawalAttempt) {
+      _showSnackBar(
+        "Selesaikan pemeriksaan penarikan sebelumnya dengan nominal dan rekening yang sama terlebih dahulu.",
+        Colors.orange,
+      );
+      return;
+    }
+
     setState(() {
-      if (inputAmount == "0" && value != ".")
-        inputAmount = value;
+      if (inputAmount == "0")
+        inputAmount = value == "00" ? "0" : value;
       else if (inputAmount.length < 10)
         inputAmount += value;
     });
   }
 
   void onBackspace() {
+    if (_hasPendingWithdrawalAttempt) {
+      _showSnackBar(
+        "Nominal dikunci sampai status penarikan sebelumnya terkonfirmasi.",
+        Colors.orange,
+      );
+      return;
+    }
+
     setState(() {
       if (inputAmount.length > 1)
         inputAmount = inputAmount.substring(0, inputAmount.length - 1);
@@ -223,7 +241,9 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
   }
 
   // -- HANDLE WITHDRAW --
-  void _handleWithdraw() async {
+  void _handleWithdraw(String pin) async {
+    if (_isSubmitting) return;
+
     if (selectedBankId == null) {
       _showSnackBar("Pilih bank tujuan terlebih dahulu", Colors.orange);
       return;
@@ -232,19 +252,27 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
       _showSnackBar("Minimal penarikan adalah Rp 50.000", Colors.orange);
       return;
     }
-    if (rawAmount > widget.maxBalance) {
+    if (rawAmount > widget.maxBalance && !_hasPendingWithdrawalAttempt) {
       _showSnackBar("Saldo Anda tidak mencukupi", Colors.red);
       return;
     }
 
     setState(() => _isSubmitting = true);
-    final success = await _walletService.requestWithdraw(
+    final result = await _walletService.requestWithdraw(
       amount: inputAmount,
       methodId: selectedBankId!,
+      pin: pin,
     );
-    setState(() => _isSubmitting = false);
 
-    if (success) {
+    if (!mounted) return;
+    setState(() {
+      _isSubmitting = false;
+      _hasPendingWithdrawalAttempt =
+          result.status == WithdrawalRequestStatus.uncertain ||
+          result.status == WithdrawalRequestStatus.pendingRequestMismatch;
+    });
+
+    if (result.isSuccess) {
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -252,11 +280,18 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
             amount: inputAmount,
             finalAmount: finalAmount.toString(),
             bankName: selectedBank?['bank_name'] ?? "Bank",
+            withdrawalStatus: result.withdrawalStatus,
           ),
         ),
       );
     } else {
-      _showSnackBar("Gagal memproses, coba lagi nanti", Colors.red);
+      final isUncertain =
+          result.status == WithdrawalRequestStatus.uncertain ||
+          result.status == WithdrawalRequestStatus.pendingRequestMismatch;
+      _showSnackBar(
+        result.message,
+        isUncertain ? Colors.orange : Colors.red,
+      );
     }
   }
 
@@ -272,10 +307,6 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 
   @override
   Widget build(BuildContext context) {
-    print("========================================");
-    print("🕵️ DEBUG SCREEN: Nilai maxBalance diterima: ${widget.maxBalance}");
-    print("🕵️ DEBUG SCREEN: Tipe data: ${widget.maxBalance.runtimeType}");
-    print("========================================");
     return AppBackgroundScaffold(
       child: Column(
         children: [
@@ -627,7 +658,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _keyBtn(".", isText: true),
+                _keyBtn("00", isText: true),
                 _keyBtn("0", isText: true),
                 GestureDetector(
                   onTap: onBackspace,
@@ -711,7 +742,7 @@ class _WithdrawInputScreenState extends State<WithdrawInputScreen> {
 // --- TARUH DI PALING BAWAH FILE (DI LUAR CLASS UTAMA) ---
 
 class _PinInputDialog extends StatefulWidget {
-  final VoidCallback onPinSuccess;
+  final ValueChanged<String> onPinSuccess;
   const _PinInputDialog({required this.onPinSuccess});
 
   @override
@@ -748,8 +779,9 @@ class _PinInputDialogState extends State<_PinInputDialog> {
 
       if (response.statusCode == 200) {
         if (mounted) {
+          final verifiedPin = _pinController.text;
           Navigator.pop(context); // Tutup Popup
-          widget.onPinSuccess(); // Lanjut Withdraw
+          widget.onPinSuccess(verifiedPin); // Lanjut Withdraw dengan PIN
         }
       } else {
         setState(() {
@@ -763,6 +795,12 @@ class _PinInputDialogState extends State<_PinInputDialog> {
     } finally {
       if (mounted) setState(() => isChecking = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
   }
 
   @override

@@ -71,7 +71,11 @@ Route::get('/', function () {
         ->get();
 
     $bounties = \App\Models\Bounty::where('status', 'active')->latest()->take(6)->get();
-    $totalPayout = \App\Models\Transaction::where('type', 'payout')->sum('amount');
+    $totalPayout = \App\Models\Transaction::where('type', \App\Models\Transaction::TYPE_BOUNTY_PRIZE)
+        ->whereHas('user', function ($q) {
+            $q->where('role', 'clipper');
+        })
+        ->sum('amount');
     $totalClipper = \App\Models\User::where('role', 'clipper')->count();
     $activeBounties = \App\Models\Bounty::where('status', 'active')->count();
     $topPrizePool = \App\Models\Bounty::where('status', 'active')->sum('reward_amount');
@@ -223,10 +227,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/withdraw', [WithdrawalController::class, 'create'])->name('withdrawals.create');
         Route::post('/withdraw', [WithdrawalController::class, 'store'])->name('withdrawals.store');
         
-        // Admin Approval Withdrawal (Bisa dipisah ke middleware admin kalau mau lebih spesifik)
-        Route::post('/admin/withdrawals/{id}/approve', [WithdrawalController::class, 'approve'])->name('admin.withdrawals.approve');
-        Route::post('/admin/withdrawals/{id}/reject', [WithdrawalController::class, 'reject'])->name('admin.withdrawals.reject');
-
         // Payout Methods
         Route::get('/my-banks', [PayoutMethodController::class, 'index'])->name('payout-methods.index');
         Route::post('/my-banks', [PayoutMethodController::class, 'store'])->name('payout-methods.store');

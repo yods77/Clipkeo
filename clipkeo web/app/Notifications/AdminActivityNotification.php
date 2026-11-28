@@ -39,6 +39,17 @@ class AdminActivityNotification extends Notification
 
         // LOGIKA PESAN UNTUK ADMIN
         switch ($this->type) {
+            case 'deposit_success':
+                // Deposit Publisher yang telah dikonfirmasi berhasil oleh Xendit.
+                $publisherName = $this->data->user?->name ?? 'Publisher';
+                $depositAmount = number_format((float) ($this->data->amount ?? 0), 0, ',', '.');
+                $referenceId = $this->data->reference_id ?? '-';
+                $title = 'Deposit Publisher Berhasil';
+                $message = $publisherName . ' berhasil deposit Rp ' . $depositAmount . ' (Ref: ' . $referenceId . ')';
+                $icon = 'money';
+                $color = 'green';
+                break;
+
             case 'deposit_request':
                 // Publisher mengajukan deposit
                 $title = 'Deposit Masuk';
@@ -78,6 +89,11 @@ class AdminActivityNotification extends Notification
             'icon' => $icon,
             'color' => $color,
             'data_id' => $this->data->id ?? null, // ID Transaksi/Pesan
+            'reference_id' => $this->data->reference_id ?? null,
+            'amount' => $this->data->amount ?? $this->data->amount_requested ?? null,
+            'url' => $this->type === 'deposit_success' && !empty($this->data->reference_id)
+                ? route('wallet.index', ['search' => $this->data->reference_id, 'type' => 'deposit'])
+                : null,
             'timestamp' => now()
         ];
     }

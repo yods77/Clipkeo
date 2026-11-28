@@ -5,22 +5,57 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Auth\Events\Registered;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rules;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class RegisteredUserController extends Controller
 {
     /**
-     * Display the registration view.
+     * Display the registration view with province and previously selected regency options.
      */
     public function create(): View
     {
-        return view('auth.register');
+        $provinces = DB::table('provinces')
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        $selectedProvince = old('province');
+        $regencies = $selectedProvince
+            ? DB::table('regencies')
+                ->where('province_id', $selectedProvince)
+                ->orderBy('name')
+                ->get(['id', 'name'])
+            : collect();
+
+        return view('auth.register', compact('provinces', 'regencies'));
+    }
+
+    /**
+     * Return only regencies belonging to the selected province.
+     */
+    public function regencies(string $province): JsonResponse
+    {
+        $provinceExists = DB::table('provinces')
+            ->where('id', $province)
+            ->exists();
+
+        if (!$provinceExists) {
+            return response()->json(['message' => 'Provinsi tidak ditemukan.'], 404);
+        }
+
+        $regencies = DB::table('regencies')
+            ->where('province_id', $province)
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return response()->json($regencies);
     }
 
     /**
@@ -30,25 +65,35 @@ class RegisteredUserController extends Controller
      */
     public function store(Request $request): RedirectResponse
     {
-        // 1. VALIDASI: Pastikan user memilih role yang valid (clipper atau publisher)
         $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'phone_number' => ['required', 'string', 'max:255'],
+            'phone_number' => ['required', 'string', 'max:30'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:' . User::class],
             'password' => ['required', 'confirmed', \Illuminate\Validation\Rules\Password::defaults()],
-            'role' => ['required', 'string', 'in:clipper,publisher'], // <--- BARIS PENTING INI
-            'gender' => ['required', 'in:Laki-laki,Perempuan'],
-            'birthday' => ['required', 'date'],
-            'province' => ['required', 'exists:provinces,id'], // Pastikan ID ada di tabel provinces
-            'city' => ['required', 'exists:regencies,id'],
+            'role' => ['required', 'string', 'in:clipper,publisher'],
+            'gender' => ['required', Rule::in(['Laki-laki', 'Perempuan'])],
+            'birthday' => ['required', 'date', 'before_or_equal:today'],
+            'province' => ['required', 'string', Rule::exists('provinces', 'id')],
+            'city' => [
+                'required',
+                'string',
+                Rule::exists('regencies', 'id')->where(
+                    fn ($query) => $query->where('province_id', $request->input('province'))
+                ),
+            ],
         ]);
 
-        // 2. SIMPAN KE DATABASE
+        $baseUsername = Str::slug($request->input('name')) ?: 'clipper';
+
+        do {
+            $username = Str::limit($baseUsername, 40, '') . '-' . Str::lower(Str::random(6));
+        } while (User::where('username', $username)->exists());
+
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
-            'username' => \Illuminate\Support\Str::slug($request->name) . rand(10, 99),
+            'username' => $username,
             'phone_number' => $request->phone_number,
             'role' => $request->role,
             'gender' => $request->gender,

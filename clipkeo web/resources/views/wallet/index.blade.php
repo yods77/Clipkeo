@@ -170,9 +170,11 @@
                                             $options = [
                                                 ['label' => 'Semua Tipe', 'value' => ''],
                                                 ['label' => 'Deposit', 'value' => 'deposit'],
-                                                ['label' => 'Hadiah Misi', 'value' => 'reward'],
-                                                ['label' => 'Payout', 'value' => 'payout'],
+                                                ['label' => 'Hadiah Campaign', 'value' => 'bounty_prize'],
+                                                ['label' => 'Refund Dana', 'value' => 'bounty_refund'],
+                                                ['label' => 'Hold Dana', 'value' => 'bounty_hold'],
                                                 ['label' => 'Withdrawal', 'value' => 'withdrawal'],
+                                                ['label' => 'Refund Withdrawal', 'value' => 'withdrawal_refund'],
                                                 ['label' => 'Biaya Admin', 'value' => 'platform_fee'],
                                             ];
                                         @endphp
@@ -248,56 +250,62 @@
                                     $badgeClass = '';
 
                                     // ==========================================================
-                                    // 1. LOGIKA WARNA & SIMBOL NOMINAL (SUKSES)
+                                    // 1. LOGIKA WARNA & SIMBOL NOMINAL
+                                    // Arah transaksi ditentukan dari pemilik ledger, bukan tipe saja.
                                     // ==========================================================
+                                    $transactionOwnerRole = $isAdmin
+                                        ? optional($trx->user)->role
+                                        : auth()->user()->role;
 
-                                    if ($isAdmin) {
-                                        // --- LOGIKA ADMIN ---
-                                        if ($trx->type === 'platform_fee') {
+                                    $isIncome = false;
+                                    if (in_array($trx->type, ['deposit', 'bounty_refund', 'refund', 'reward', 'withdrawal_refund'], true)) {
+                                        $isIncome = true;
+                                    } elseif ($trx->type === 'bounty_prize') {
+                                        $isIncome = $transactionOwnerRole === 'clipper';
+                                    } elseif ($trx->type === 'payout') {
+                                        $isIncome = false;
+                                    }
+
+                                    if ($isAdmin && $trx->type === 'platform_fee') {
+                                        if ($trx->status === 'success') {
                                             $amountColor = 'text-emerald-600';
-                                            $symbol = '+'; // Profit (Hijau Tua)
-                                        } elseif ($trx->type === 'withdrawal') {
-                                            $amountColor = 'text-rose-600';
-                                            $symbol = '-'; // Uang Keluar (Merah)
-                                        } elseif ($trx->type === 'deposit') {
-                                            $amountColor = 'text-blue-600';
-                                            $symbol = '+'; // Uang Masuk (Biru)
-                                        } else {
-                                            // Transaksi Internal
-                                            $amountColor = 'text-amber-600';
-                                            $symbol = in_array($trx->type, ['reward', 'bounty_refund']) ? '+' : '-';
-                                        }
-                                    } else {
-                                        // --- LOGIKA USER (CLIPPER/PUBLISHER) ---
-                                        $incomeTypes = ['deposit', 'reward', 'refund'];
-
-                                        if (in_array($trx->type, $incomeTypes)) {
-                                            $amountColor = 'text-emerald-600'; // Hijau Income
                                             $symbol = '+';
                                         } else {
-                                            $amountColor = 'text-rose-600'; // Merah Expense
-                                            $symbol = '-';
+                                            // Pending or failed fees are not platform revenue.
+                                            $amountColor = 'text-amber-600';
+                                            $symbol = '';
                                         }
+                                    } elseif ($isAdmin && $trx->type === 'deposit') {
+                                        $amountColor = 'text-blue-600';
+                                        $symbol = '+';
+                                    } else {
+                                        $amountColor = $isIncome ? 'text-emerald-600' : 'text-rose-600';
+                                        $symbol = $isIncome ? '+' : '-';
                                     }
 
                                     // ==========================================================
-                                    // 2. LOGIKA LABEL BADGE & WARNA BADGE (PASTEL STYLE)
+                                    // 2. LOGIKA LABEL BADGE & WARNA BADGE
                                     // ==========================================================
-
                                     switch ($trx->type) {
                                         case 'deposit':
                                             $badgeLabel = 'Deposit';
                                             $badgeClass = 'bg-blue-50 text-blue-700 border-blue-200';
+                                            break;
+                                        case 'bounty_prize':
+                                            $badgeLabel = $transactionOwnerRole === 'publisher'
+                                                ? 'Pembayaran Hadiah'
+                                                : 'Hadiah Misi';
+                                            $badgeClass = $transactionOwnerRole === 'publisher'
+                                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                                : 'bg-emerald-50 text-emerald-700 border-emerald-200';
                                             break;
                                         case 'reward':
                                             $badgeLabel = 'Hadiah Misi';
                                             $badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
                                             break;
                                         case 'payout':
-                                            $badgeLabel = 'Bayar Pemenang';
-                                            $badgeClass = $isAdmin
-                                                ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                                : 'bg-rose-50 text-rose-700 border-rose-200';
+                                            $badgeLabel = 'Pembayaran Hadiah';
+                                            $badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
                                             break;
                                         case 'bounty_hold':
                                             $badgeLabel = 'Hold Dana';
@@ -305,22 +313,38 @@
                                                 ? 'bg-amber-50 text-amber-700 border-amber-200'
                                                 : 'bg-gray-100 text-gray-600 border-gray-200';
                                             break;
+                                        case 'bounty_refund':
                                         case 'refund':
                                             $badgeLabel = 'Refund Dana';
                                             $badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
                                             break;
+                                        case 'withdrawal_refund':
+                                            $badgeLabel = 'Refund Withdrawal';
+                                            $badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                            break;
                                         case 'platform_fee':
-                                            if ($isAdmin) {
+                                            if ($isAdmin && $trx->status === 'success') {
                                                 $badgeLabel = 'Profit Fee';
                                                 $badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                                            } elseif ($isAdmin && $trx->status === 'pending') {
+                                                $badgeLabel = 'Fee Pending';
+                                                $badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
+                                            } elseif ($isAdmin) {
+                                                $badgeLabel = 'Fee Dibatalkan';
+                                                $badgeClass = 'bg-gray-100 text-gray-600 border-gray-200';
+                                            } elseif ($trx->status === 'failed') {
+                                                $badgeLabel = 'Admin Fee Dikembalikan';
+                                                $badgeClass = 'bg-gray-100 text-gray-600 border-gray-200';
                                             } else {
                                                 $badgeLabel = 'Admin Fee';
                                                 $badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
                                             }
                                             break;
                                         case 'withdrawal':
-                                            $badgeLabel = 'Withdraw';
-                                            $badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
+                                            $badgeLabel = $trx->status === 'failed' ? 'Withdraw Gagal' : 'Withdraw';
+                                            $badgeClass = $trx->status === 'failed'
+                                                ? 'bg-gray-100 text-gray-600 border-gray-200'
+                                                : 'bg-rose-50 text-rose-700 border-rose-200';
                                             break;
                                         default:
                                             $badgeLabel = $trx->type;

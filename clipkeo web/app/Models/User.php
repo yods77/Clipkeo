@@ -26,13 +26,13 @@ class User extends Authenticatable
         'email',
         'password',
         'fcm_token',
-        'username',       // Wajib
+        'username',
         'phone_number',
-        'role',           // Wajib
-        'wallet_balance', // Baru
-        'reputation_score', // Baru
-        'avatar_url',     // Baru
-        'is_verified',    // Baru
+        'role',
+        'wallet_balance',
+        'reputation_score',
+        'avatar_url',
+        'is_verified',
         'google_id',
         'security_pin',
         'gender',
@@ -51,6 +51,8 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'security_pin',
+        'google_id',
+        'fcm_token',
     ];
 
     /**
@@ -66,25 +68,21 @@ class User extends Authenticatable
         ];
     }
 
-    // Relasi 1: User punya banyak Akun Sosmed
     public function linkedAccounts()
     {
         return $this->hasMany(LinkedAccount::class);
     }
 
-    // Relasi 2: User (sebagai Publisher) punya banyak Sayembara
     public function bounties()
     {
         return $this->hasMany(Bounty::class, 'publisher_id');
     }
 
-    // Relasi 3: User (sebagai Clipper) punya banyak Setoran Video
     public function submissions()
     {
         return $this->hasMany(Submission::class, 'clipper_id');
     }
 
-    // Relasi 4: User punya Dompet (Transaksi)
     public function transactions()
     {
         return $this->hasMany(Transaction::class);
@@ -95,63 +93,43 @@ class User extends Authenticatable
         return $this->hasMany(PayoutMethod::class);
     }
 
-
-
-    // Relasi ke tabel payout_methods
     public function payoutMethod()
     {
         return $this->hasOne(PayoutMethod::class)->where('is_primary', true);
     }
 
-    // ==========================================
-    // SISTEM REPUTASI & BADGES
-    // ==========================================
-
-    // 1. Relasi ke Badges
     public function badges()
     {
         return $this->belongsToMany(Badge::class, 'user_badges', 'user_id', 'badge_id')
             ->withPivot('awarded_at');
     }
 
-    // 2. Fungsi Ambil Badge Tertinggi (Untuk dipasang di Card Profil)
     public function getCurrentBadge()
     {
-        // Ambil badge yang dimiliki user, urutkan dari syarat XP tertinggi
         return $this->badges()->orderBy('xp_req', 'desc')->first();
     }
 
-    // 3. MESIN OTOMATIS: Tambah Poin & Cek Hadiah
-    // Panggil fungsi ini setiap User selesaikan misi!
     public function addReputation($amount)
     {
-        // Tambah Poin ke kolom reputation_points
         $this->increment('reputation_points', $amount);
-
-        // Update Nama Tier di kolom reputation_score (Opsional/Sesuai kebutuhan)
         $this->updateTierLevel();
-
-        // Cek apakah berhak dapat Badge baru?
         $this->checkAndAwardBadges();
     }
 
-    // 4. Logika Update Nama Tier (reputation_score)
     private function updateTierLevel()
     {
         $points = $this->reputation_points;
-        
-        // Cek Poin & Tentukan Level Angka
+
         if ($points >= 5000) {
-            $level = 4; // Diamond
+            $level = 4;
         } elseif ($points >= 2000) {
-            $level = 3; // Gold
+            $level = 3;
         } elseif ($points >= 500) {
-            $level = 2; // Silver
+            $level = 2;
         } else {
-            $level = 1; // Bronze (0 - 499 XP)
+            $level = 1;
         }
 
-        // Simpan jika level berubah
         if ($this->reputation_score !== $level) {
             $this->update(['reputation_score' => $level]);
         }
@@ -160,10 +138,10 @@ class User extends Authenticatable
     public function getTierNameAttribute()
     {
         return match ($this->reputation_score) {
-            1 => 'Bronze Clipper',   // Level Awal
+            1 => 'Bronze Clipper',
             2 => 'Silver Clipper',
             3 => 'Gold Clipper',
-            4 => 'Diamond Clipper',  // Level Tertinggi
+            4 => 'Diamond Clipper',
             default => 'Bronze Clipper',
         };
     }
@@ -172,34 +150,27 @@ class User extends Authenticatable
     {
         $points = $this->reputation_points;
 
-        // Target Level Berikutnya
         if ($points < 500) {
-            $target = 500;  // Bronze menuju Silver
+            $target = 500;
         } elseif ($points < 2000) {
-            $target = 2000; // Silver menuju Gold
+            $target = 2000;
         } elseif ($points < 5000) {
-            $target = 5000; // Gold menuju Diamond
+            $target = 5000;
         } else {
-            return 100; // Sudah Diamond (Mentok)
+            return 100;
         }
 
-        // Rumus Persentase: (Poin Saat Ini / Target) * 100
-        $percentage = ($points / $target) * 100;
-
-        // Kita bulatkan agar angkanya rapi (tidak koma-koma)
-        return round($percentage);
+        return round(($points / $target) * 100);
     }
-    // 5. Logika Cek & Beri Badge
+
     private function checkAndAwardBadges()
     {
-        // Cari badge yang syarat XP-nya sudah terlampaui TAPI belum dimiliki user
         $newBadges = Badge::where('xp_req', '<=', $this->reputation_points)
             ->whereDoesntHave('users', function ($query) {
                 $query->where('user_id', $this->id);
             })
             ->get();
 
-        // Berikan semua badge yang memenuhi syarat
         foreach ($newBadges as $badge) {
             $this->badges()->attach($badge->id, ['awarded_at' => now()]);
         }

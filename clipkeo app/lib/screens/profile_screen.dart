@@ -92,7 +92,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       String? token = prefs.getString('token');
 
       final url = Uri.parse('${AppConfig.baseUrl}/user');
-      print("🚀 REQUEST PROFILE: $url");
 
       final response = await http.get(
         url,
@@ -102,7 +101,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         },
       );
 
-      print("📦 RESPONSE PROFILE: ${response.body}");
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body);
@@ -126,7 +124,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             // Perbaiki URL Foto (Tambah http://... jika cuma path)
             avatarUrl = AppConfig.fixImageUrl(rawPhoto);
-            print("📸 AVATAR FINAL: $avatarUrl");
 
             // 3. FILL FORM DATA PRIBADI
             _nameController.text = user['name'] ?? "";
@@ -173,11 +170,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           });
         }
       } else {
-        print("❌ Gagal ambil profile: ${response.statusCode}");
         if (mounted) setState(() => _isLoading = false);
       }
-    } catch (e) {
-      print("❌ Error Profile: $e");
+    } catch (_) {
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -226,7 +221,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       var streamedResponse = await request.send();
       var response = await http.Response.fromStream(streamedResponse);
 
-      print("📤 UPLOAD RESPONSE: ${response.body}");
 
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body);
@@ -244,7 +238,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         throw Exception("Gagal upload: ${response.statusCode}");
       }
     } catch (e) {
-      print("❌ Error Upload: $e");
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Gagal mengunggah foto: $e")));
@@ -287,8 +280,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
         fetchProfileData();
       }
-    } catch (e) {
-      print("Error update: $e");
+    } catch (_) {
     }
   }
 
@@ -316,9 +308,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               'Accept': 'application/json',
             },
           );
-          print("✅ Sukses Logout dari Server (FCM Hangus)");
-        } catch (serverError) {
-          print("⚠️ Gagal connect server saat logout (Abaikan): $serverError");
+        } catch (_) {
         }
       }
 
@@ -336,8 +326,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           (route) => false, // Hapus semua history halaman sebelumnya
         );
       }
-    } catch (e) {
-      print("❌ Error Logout Fatal: $e");
+    } catch (_) {
       // Safety Net: Kalau error parah, tetap paksa pindah ke login
       if (mounted) {
         Navigator.pushAndRemoveUntil(

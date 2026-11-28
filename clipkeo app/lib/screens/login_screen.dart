@@ -5,6 +5,7 @@ import 'register_name_screen.dart'; // Import halaman input nama
 import 'main_screen.dart'; // Panggil file induknya
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../config.dart';
 import 'welcome_screen.dart';
 import 'ForgotPasswordScreen.dart';
 
@@ -34,7 +35,11 @@ class _LoginScreenState extends State<LoginScreen> {
   Timer? _autoScrollTimer;
 
   // Pakai cara paling simpel
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: AppConfig.googleServerClientId.isEmpty
+        ? null
+        : AppConfig.googleServerClientId,
+  );
 
   @override
   /**
@@ -99,8 +104,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // --- FUNGSI PEMBANTU: SIMPAN SESSION ---
   Future<void> _performSaveSession(Map<String, dynamic> result) async {
-    print("💾 [SAVE SESSION] Memulai proses simpan data...");
-    print("📦 [DEBUG DATA] Data diterima: $result"); // Lihat isi data mentah
 
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -110,13 +113,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // 1. Coba ambil dari result['user'] (Format standar)
       if (result['user'] != null) {
-        print("✅ [LOGIC] Menemukan format result['user']");
         userIdToSave = result['user']['id'].toString();
         userNameToSave = result['user']['name'].toString();
       }
       // 2. Coba ambil dari result['data']['user'] (Format nested)
       else if (result['data'] != null && result['data']['user'] != null) {
-        print("✅ [LOGIC] Menemukan format result['data']['user']");
         userIdToSave = result['data']['user']['id'].toString();
         userNameToSave = result['data']['user']['name'].toString();
       }
@@ -129,7 +130,6 @@ class _LoginScreenState extends State<LoginScreen> {
       // EKSEKUSI SIMPAN
       if (userIdToSave != null) {
         await prefs.setString('user_id', userIdToSave);
-        print("💾 [SUCCESS] User ID ($userIdToSave) BERHASIL DISIMPAN!");
 
         if (userNameToSave != null) {
           await prefs.setString('user_name', userNameToSave);
@@ -137,13 +137,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (tokenToSave != null) {
           await prefs.setString('token', tokenToSave);
-          print("🔑 [SUCCESS] Token BERHASIL DISIMPAN!");
         }
       } else {
-        print("⚠️ [WARNING] Gagal menemukan ID User di dalam JSON server.");
       }
-    } catch (e) {
-      print("❌ [ERROR CRITICAL] Gagal Simpan Session: $e");
+    } catch (_) {
     }
   }
 
@@ -191,14 +188,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
     // 2. Panggil Service Login
     // Debug Print untuk melihat respon asli di Console
-    print("🚀 Melakukan Login ke: ${_authService.baseUrl}");
 
     Map<String, dynamic> result = await _authService.login(
       _emailController.text,
       _passwordController.text,
     );
 
-    print("🕵️ HASIL RESULT: $result"); // <--- Cek ini di console nanti
 
     setState(() => _isLoading = false);
 
@@ -209,10 +204,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Cek apakah benar-benar user baru (Namanya kosong)
       if (result['is_new_user'] == true) {
-        print("⚠️ Terdeteksi User Baru (Nama Kosong) -> Ke Register");
         _navigateToRegister();
       } else {
-        print("✅ User Lama -> Ke Dashboard");
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const MainScreen()),
@@ -223,7 +216,6 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       String message =
           result['message']?.toString().toLowerCase() ?? "unknown error";
-      print("❌ LOGIN GAGAL: $message");
 
       // Skenario 1: Password Salah
       if (message.contains("password") ||
@@ -262,36 +254,39 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handleGoogleLogin() async {
     try {
-      // 1. Pilih Akun Google
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return; // User batal pilih akun
+      if (googleUser == null) return;
 
+      final googleAuthentication = await googleUser.authentication;
+      final idToken = googleAuthentication.idToken;
+
+      if (idToken == null || idToken.isEmpty) {
+        _showErrorSnackBar(
+          'Google Sign-In belum dikonfigurasi. Web OAuth Client ID perlu dipasang pada aplikasi.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
       setState(() => _isLoading = true);
 
-      // 2. Kirim ke Backend Laravel
-      final result = await _authService.loginWithGoogle(
-        email: googleUser.email,
-        googleId: googleUser.id,
-        name: googleUser.displayName ?? "User Clipkeo",
-        photoUrl: googleUser.photoUrl,
-      );
+      final result = await _authService.loginWithGoogle(idToken: idToken);
 
+      if (!mounted) return;
       setState(() => _isLoading = false);
 
       if (result['success'] == true) {
-        // ✅ BERHASIL! Langsung lempar ke WelcomeScreen
-        if (!mounted) return;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const WelcomeScreen()),
         );
       } else {
-        // Tampilkan error jika gagal
-        _showErrorSnackBar(result['message']);
+        _showErrorSnackBar(result['message'] ?? 'Google Sign-In gagal.');
       }
-    } catch (error) {
+    } catch (_) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      _showErrorSnackBar("Terjadi kesalahan: $error");
+      _showErrorSnackBar('Google Sign-In gagal. Silakan coba lagi.');
     }
   }
 

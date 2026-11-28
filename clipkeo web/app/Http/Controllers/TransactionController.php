@@ -45,7 +45,27 @@ class TransactionController extends Controller
 
         // 4. Filter Tipe Transaksi
         if ($request->filled('type')) {
-            $query->where('type', $request->type);
+            $legacyTypes = [
+                'reward' => Transaction::TYPE_BOUNTY_PRIZE,
+                'payout' => Transaction::TYPE_BOUNTY_PRIZE,
+                'refund' => Transaction::TYPE_BOUNTY_REFUND,
+            ];
+
+            $requestedType = (string) $request->input('type');
+            $type = $legacyTypes[$requestedType] ?? $requestedType;
+            $allowedTypes = [
+                Transaction::TYPE_DEPOSIT,
+                Transaction::TYPE_WITHDRAWAL,
+                Transaction::TYPE_BOUNTY_HOLD,
+                Transaction::TYPE_BOUNTY_PRIZE,
+                Transaction::TYPE_BOUNTY_REFUND,
+                Transaction::TYPE_PLATFORM_FEE,
+                Transaction::TYPE_WITHDRAWAL_REFUND,
+            ];
+
+            if (in_array($type, $allowedTypes, true)) {
+                $query->where('type', $type);
+            }
         }
 
         // 5. Filter Tanggal (Start & End)

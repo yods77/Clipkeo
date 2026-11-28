@@ -23,21 +23,21 @@ use Illuminate\Support\Str;
 use Cloudinary\Cloudinary;
 
 // === PINTU UMUM (Bisa diakses tanpa token) ===
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login']); // <--- INI YANG HILANG TADI!
-Route::post('/login-google', [AuthController::class, 'googleLogin']);
-Route::post('/forgot-password', [PasswordResetController::class, 'sendOtp']);
-Route::post('/reset-password', [PasswordResetController::class, 'resetPassword']);
-Route::post('/forgot-pin', [PinResetController::class, 'sendOtp']);
-Route::post('/reset-pin', [PinResetController::class, 'resetPin']);
-Route::post('/verify-pin-otp', [PinResetController::class, 'verifyOtp']);
+Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+Route::post('/login-google', [AuthController::class, 'googleLogin'])->middleware('throttle:5,1');
+Route::post('/forgot-password', [PasswordResetController::class, 'sendOtp'])->middleware('throttle:5,1');
+Route::post('/reset-password', [PasswordResetController::class, 'resetPassword'])->middleware('throttle:10,1');
+Route::post('/forgot-pin', [PinResetController::class, 'sendOtp'])->middleware('throttle:5,1');
+Route::post('/reset-pin', [PinResetController::class, 'resetPin'])->middleware('throttle:10,1');
+Route::post('/verify-pin-otp', [PinResetController::class, 'verifyOtp'])->middleware('throttle:10,1');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/wallet/check-pin', [WalletController::class, 'cekPin']);
     Route::post('/wallet/setup-pin', [WalletController::class, 'setupPin']);
-    Route::post('/wallet/withdraw', [WalletController::class, 'withdraw']);
-    Route::post('/wallet/validate-pin', [ProfileController::class, 'validatePin']);
+    Route::post('/wallet/withdraw', [WalletController::class, 'withdraw'])->middleware('throttle:5,1');
+    Route::post('/wallet/validate-pin', [ProfileController::class, 'validatePin'])->middleware('throttle:5,1');
     Route::get('/dashboard', [DashboardController::class, 'index']);
     Route::get('/user', [ProfileController::class, 'index']);
     Route::post('/profile/update', [ProfileController::class, 'update']);
@@ -90,6 +90,43 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/read-all', function (Request $request) {
         $request->user()->unreadNotifications->markAsRead();
         return response()->json(['status' => 'success']);
+    });
+
+    Route::get('/wallet/dashboard', function (Request $request) {
+        $user = $request->user()->load('payoutMethods');
+        $transactions = $user->transactions()
+            ->orderByDesc('created_at')
+            ->limit(20)
+            ->get();
+
+        return response()->json([
+            'status' => true,
+            'data' => [
+                'balance' => (int) $user->wallet_balance,
+                'role' => $user->role,
+                'reputation_points' => (int) $user->reputation_points,
+                'tier' => $user->getTierNameAttribute(),
+                'transactions' => $transactions,
+                'unread_notifications_count' => $user->unreadNotifications()->count(),
+                'payout_methods' => $user->payoutMethods,
+                'service_fee_pct' => 0.10,
+                'min_withdraw' => 50000,
+            ],
+        ]);
+    });
+
+    Route::get('/payout-methods', [PayoutMethodController::class, 'index']);
+
+    Route::get('/my-submissions', function (Request $request) {
+        $submissions = $request->user()->submissions()
+            ->with('bounty')
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $submissions,
+        ]);
     });
 });
 
@@ -235,7 +272,6 @@ Route::post('/campaigns/{id}/submit', function (Request $request, $id) {
 
     // 2. VALIDASI AWAL
     $validator = Validator::make($request->all(), [
-        'user_id' => 'required',
         'video_link' => 'required|url',
         'current_views' => 'required|integer',
         'analytics_file' => 'required|file|max:102400',
@@ -246,8 +282,27 @@ Route::post('/campaigns/{id}/submit', function (Request $request, $id) {
         return response()->json(['status' => 'error', 'message' => $validator->errors()->first()], 400);
     }
 
+    $linkedAccount = \App\Models\LinkedAccount::query()
+        ->whereKey($request->input('linked_account_id'))
+        ->where('user_id', $request->user()->id)
+        ->first();
+
+    if (!$linkedAccount) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Akun media sosial tidak valid.',
+        ], 403);
+    }
+
     try {
         $bounty = Bounty::find($id);
+
+        if (!$bounty) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Campaign tidak ditemukan.',
+            ], 404);
+        }
 
         // 3. PANGGIL POLISI (Gunakan variabel $extractId)
         $result = $extractId($request->video_link);
@@ -302,7 +357,7 @@ Route::post('/campaigns/{id}/submit', function (Request $request, $id) {
 
         if ($existing) {
             // JIKA PEMILIK BEDA -> BLOKIR (ANTI-TIKUNG)
-            if ($existing->clipper_id != $request->user_id) {
+            if ($existing->clipper_id != $request->user()->id) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Link video ini sudah diklaim clipper lain. Gunakan video original milikmu sendiri!'
@@ -360,11 +415,11 @@ if ($request->hasFile('analytics_file')) {
         $submission = Submission::updateOrCreate(
             [
                 'video_id' => $videoId, // Cari berdasarkan ID ini
-                'clipper_id' => $request->user_id
+                'clipper_id' => $request->user()->id
             ],
             [
                 'bounty_id' => $id,
-                'linked_account_id' => $request->linked_account_id,
+                'linked_account_id' => $linkedAccount->id,
                 'video_url' => $request->video_link,
                 'views_count' => $request->current_views,
                 'caption_content' => $request->caption_content,
@@ -392,85 +447,23 @@ if ($request->hasFile('analytics_file')) {
         ]);
 
     } catch (\Throwable $e) {
-        Log::error("GAGAL SUBMIT: " . $e->getMessage());
-        return response()->json(['status' => 'error', 'message' => 'Server Crash: ' . $e->getMessage()], 500);
-    }
-});
-
-Route::get('/cek-config', function () {
-    return response()->json([
-        'post_max_size' => ini_get('post_max_size'),
-        'upload_max_filesize' => ini_get('upload_max_filesize'),
-        'memory_limit' => ini_get('memory_limit'),
-        'max_execution_time' => ini_get('max_execution_time'),
-    ]);
-});
-
-Route::get('/my-submissions', function (Request $request) {
-    // Paksa user_id jadi Integer agar sinkron dengan Database
-    $userId = (int) $request->query('user_id');
-
-    if (!$userId) {
-        return response()->json(['status' => 'error', 'message' => 'ID Kosong'], 400);
-    }
-
-    try {
-        $submissions = App\Models\Submission::where('clipper_id', $userId)
-            ->with(['bounty']) // Mengambil data relasi
-            ->latest()
-            ->get();
-
-        // LOG untuk debug di terminal Laravel (php artisan serve)
-        \Log::info("User $userId minta data. Ketemu: " . $submissions->count());
+        Log::error('API submission failed.', [
+            'bounty_id' => $id,
+            'user_id' => $request->user()?->id,
+            'exception' => $e,
+        ]);
 
         return response()->json([
-            'status' => 'success',
-            'data' => $submissions
-        ]);
-    } catch (\Exception $e) {
-        return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+            'status' => 'error',
+            'message' => 'Submission gagal diproses karena kesalahan server. Silakan coba kembali.',
+        ], 500);
     }
-});
+})->middleware('auth:sanctum');
 
-/*
-|--------------------------------------------------------------------------
-| API WALLET DASHBOARD (UPDATED)
-|--------------------------------------------------------------------------
-| Mengambil Saldo, Riwayat Transaksi, dan Daftar Rekening Bank sekaligus.
-| Disertakan info Fee agar sinkron dengan sistem WithdrawalController.
-*/
-Route::get('/wallet/dashboard', function (Illuminate\Http\Request $request) {
-    $userId = $request->query('user_id');
 
-    // 1. Cari User & Load Relasi Rekening
-    $user = App\Models\User::with('payoutMethods')->find($userId);
 
-    if (!$user) {
-        return response()->json(['status' => 'error', 'message' => 'User not found'], 404);
-    }
 
-    // 2. Ambil 20 Transaksi Terbaru (Sinkron dengan TransactionController)
-    $transactions = App\Models\Transaction::where('user_id', $userId)
-        ->orderBy('created_at', 'desc')
-        ->limit(20)
-        ->get(); // [FIX] Menggunakan -> bukan .
 
-    return response()->json([
-        'status' => true,
-        'data' => [
-            'balance' => (int) $user->wallet_balance, //
-            'reputation_points' => (int) $user->reputation_points, //
-            'tier' => $user->getTierNameAttribute(), //
-            'transactions' => $transactions,
-            'unread_notifications_count' => $user->unreadNotifications()->count(),
-
-            // --- DATA TAMBAHAN UNTUK FITUR WITHDRAW ---
-            'payout_methods' => $user->payoutMethods, // Daftar Bank User
-            'service_fee_pct' => 0.05, // Fee 5% (Sinkron dengan WithdrawalController)
-            'min_withdraw' => 50000 // Minimal penarikan
-        ]
-    ]);
-});
 
 
 
@@ -478,12 +471,4 @@ Route::get('/wallet/dashboard', function (Illuminate\Http\Request $request) {
 Route::get('/campaigns', [BountyController::class, 'index']);
 Route::get('/categories', [BountyController::class, 'getCategories']);
 Route::get('/leaderboard', [LeaderboardController::class, 'index']);
-Route::get('/payout-methods', [PayoutMethodController::class, 'index']);
 
-Route::get('/cek-koneksi-cloud', function() {
-    return response()->json([
-        'file_config_lengkap' => config('cloudinary'), // Tanpa .php
-        'hanya_url' => config('cloudinary.cloud_url'), // Spesifik ambil url
-        'env_langsung' => env('CLOUDINARY_URL'),
-    ]);
-});

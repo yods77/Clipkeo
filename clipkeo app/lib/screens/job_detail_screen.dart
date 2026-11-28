@@ -9,7 +9,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config.dart'; //
 import 'submission_form_screen.dart';
 
-
 /*
 |--------------------------------------------------------------------------
 | CLASS: JobDetailScreen (SCROLLABLE TAB VERSION)
@@ -115,7 +114,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       finalImageUrl = data['image_url'];
     } else if (data['image_path'] != null &&
         data['image_path'].toString().isNotEmpty) {
-      finalImageUrl = "${AppConfig.baseUrl}/storage/${data['image_path']}";
+      finalImageUrl = data['image_path'].toString();
     }
 
     // Fallback ke data halaman sebelumnya
@@ -1223,29 +1222,31 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
 
     return Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      // --- LOGO YANG DIBUAT TUMPUL ---
-      ClipRRect(
-        borderRadius: BorderRadius.circular(8.r), // 🔥 Ini yang bikin LOGO-nya tumpul
-        child: Image.asset(
-          assetPath,
-          width: 22.w, // Sedikit diperbesar agar detail tumpulnya kelihatan
-          height: 22.w,
-          fit: BoxFit.cover, // PENTING: Agar gambar memenuhi area tumpul
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // --- LOGO YANG DIBUAT TUMPUL ---
+        ClipRRect(
+          borderRadius: BorderRadius.circular(
+            8.r,
+          ), // 🔥 Ini yang bikin LOGO-nya tumpul
+          child: Image.asset(
+            assetPath,
+            width: 22.w, // Sedikit diperbesar agar detail tumpulnya kelihatan
+            height: 22.w,
+            fit: BoxFit.cover, // PENTING: Agar gambar memenuhi area tumpul
+          ),
         ),
-      ),
-      SizedBox(width: 10.w),
-      // Teks Nama Platform
-      Text(
-        displayName,
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: 13.sp,
+        SizedBox(width: 10.w),
+        // Teks Nama Platform
+        Text(
+          displayName,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 13.sp,
+          ),
         ),
-      ),
-    ],
-  );
-}
+      ],
+    );
+  }
 }

@@ -9,17 +9,46 @@ import '../widgets/app_background_scaffold.dart';
 class WithdrawSuccessScreen extends StatelessWidget {
   final String amount;
   final String finalAmount; // [FIX] Definisi variabel baru
-  final String bankName;    // [FIX] Definisi variabel baru
+  final String bankName;
+  final String? withdrawalStatus;
 
   const WithdrawSuccessScreen({
-    super.key, 
-    required this.amount, 
-    required this.finalAmount, 
-    required this.bankName
+    super.key,
+    required this.amount,
+    required this.finalAmount,
+    required this.bankName,
+    this.withdrawalStatus,
   });
+
+  String get _statusTitle => switch (withdrawalStatus) {
+    'completed' => 'Penarikan Berhasil',
+    'processing' => 'Penarikan Diproses',
+    'rejected' => 'Penarikan Ditolak',
+    _ => 'Permintaan Penarikan Diterima',
+  };
+
+  String _statusDescription() {
+    final netAmount = NumberFormat.currency(
+      locale: 'id',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    ).format(double.parse(finalAmount));
+
+    return switch (withdrawalStatus) {
+      'completed' => 'Dana bersih sebesar $netAmount telah selesai diproses.',
+      'processing' =>
+        'Dana bersih sebesar $netAmount sedang diproses oleh penyedia pembayaran.',
+      'rejected' =>
+        'Permintaan sebelumnya ditolak. Periksa saldo dan riwayat transaksi untuk memastikan pengembalian dana.',
+      _ =>
+        'Dana bersih sebesar $netAmount menunggu persetujuan Admin. Dana belum dikirim ke rekening.',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isRejected = withdrawalStatus == 'rejected';
+
     return AppBackgroundScaffold(
       child: SafeArea(
         child: Padding(
@@ -37,15 +66,17 @@ class WithdrawSuccessScreen extends StatelessWidget {
                   width: 120.w,
                   height: 120.w,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFC8FF00).withValues(alpha: 0.2), // Lime Transparan
+                    color: isRejected
+                          ? Colors.red.withValues(alpha: 0.12)
+                          : const Color(0xFFC8FF00).withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
                     child: Container(
                       width: 80.w,
                       height: 80.w,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFC8FF00), // Lime Solid
+                      decoration: BoxDecoration(
+                        color: isRejected ? Colors.red : const Color(0xFFC8FF00),
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
@@ -56,9 +87,9 @@ class WithdrawSuccessScreen extends StatelessWidget {
                         ],
                       ),
                       child: Icon(
-                        SolarIconsBold.checkCircle,
+                        isRejected ? Icons.error_outline_rounded : SolarIconsBold.checkCircle,
                         size: 40.sp,
-                        color: Colors.black,
+                        color: isRejected ? Colors.white : Colors.black,
                       ),
                     ),
                   ),
@@ -73,7 +104,7 @@ class WithdrawSuccessScreen extends StatelessWidget {
                 child: Column(
                   children: [
                     Text(
-                      "Withdrawal Berhasil",
+                      _statusTitle,
                       style: TextStyle(
                         fontSize: 24.sp,
                         fontWeight: FontWeight.bold,
@@ -82,7 +113,7 @@ class WithdrawSuccessScreen extends StatelessWidget {
                     ),
                     SizedBox(height: 10.h),
                     Text(
-                      "Penarikan sebesar ${NumberFormat.currency(locale: 'id', symbol: 'Rp ', decimalDigits: 0).format(double.parse(finalAmount.toString()))} \nsedang diproses. Dana akan segera dikirim.", 
+                      _statusDescription(),
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 14.sp, color: const Color.fromARGB(255, 41, 41, 41)),
                     ),

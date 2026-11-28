@@ -12,14 +12,14 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-        if (!Schema::hasColumn('users', 'province_id')) {
-            $table->char('province_id', 2)->nullable()->after('phone_number');
-        }
-        
-        if (!Schema::hasColumn('users', 'city_id')) {
-            $table->char('city_id', 4)->nullable()->after('province_id');
-        }
-    });
+            if (!Schema::hasColumn('users', 'province_id')) {
+                $table->char('province_id', 2)->nullable()->after('birthday');
+            }
+
+            if (!Schema::hasColumn('users', 'city_id')) {
+                $table->char('city_id', 4)->nullable()->after('province_id');
+            }
+        });
     }
 
     /**
@@ -28,7 +28,13 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            //
+            if (Schema::hasColumn('users', 'city_id')) {
+                $table->dropColumn('city_id');
+            }
+
+            if (Schema::hasColumn('users', 'province_id')) {
+                $table->dropColumn('province_id');
+            }
         });
     }
 };

@@ -183,7 +183,7 @@
                             @endif
                         </div>
                         <div>
-                            <p class="text-gray-400 text-xs uppercase font-bold tracking-widest">Pending Withdrawals
+                            <p class="text-gray-400 text-xs uppercase font-bold tracking-widest">Withdrawals Need Attention
                             </p>
                             <h3 class="text-3xl font-black text-gray-900 mt-1">{{ $pendingWithdrawalsCount }} <span
                                     class="text-sm font-medium text-gray-400">Requests</span></h3>
@@ -292,6 +292,15 @@
                                                         title="{{ $wd->bank_info }}">
                                                         {{ Str::limit($wd->bank_info ?? 'No Bank Info', 30) }}
                                                     </div>
+                                                    @if ($wd->status === 'processing')
+                                                        <span class="mt-1 inline-block text-[9px] font-black tracking-wider text-blue-700 bg-blue-50 border border-blue-100 px-2 py-1 rounded">
+                                                            MENUNGGU KONFIRMASI XENDIT
+                                                        </span>
+                                                    @else
+                                                        <span class="mt-1 inline-block text-[9px] font-black tracking-wider text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1 rounded">
+                                                            MENUNGGU PERSETUJUAN
+                                                        </span>
+                                                    @endif
                                                 </div>
                                             </div>
                                         </td>
@@ -322,6 +331,7 @@
                     | TOMBOL REJECT (TOLAK)
                     | Membuka Modal Pop-up untuk mengisi alasan penolakan.
                     --}}
+                                                @if ($wd->status === 'pending')
                                                 <button type="button"
                                                     data-action="{{ route('admin.withdrawals.reject', $wd->id) }}"
                                                     data-name="{{ $wd->user->name }}"
@@ -334,6 +344,7 @@
                                                             stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                                     </svg>
                                                 </button>
+                                                @endif
 
                                                 {{-- 
                     | TOMBOL APPROVE (SETUJUI & TRANSFER)
@@ -341,11 +352,13 @@
                     --}}
                                                 <form action="{{ route('admin.withdrawals.approve', $wd->id) }}"
                                                     method="POST"
-                                                    onsubmit="return confirm('⚠️ PERINGATAN: Saldo Xendit Anda akan terpotong Rp {{ number_format($wd->amount_final, 0, ',', '.') }} dan dikirim ke User.\n\nLanjutkan transfer?')">
+                                                    onsubmit="return confirm(@js($wd->status === 'processing'
+                                                        ? 'Periksa status withdrawal ini di Xendit. Jika transfer sudah tercatat, sistem tidak akan mengirim transfer baru. Lanjutkan pemeriksaan?'
+                                                        : 'Saldo Xendit Anda akan terpotong Rp ' . number_format($wd->amount_final, 0, ',', '.') . ' dan dikirim ke User. Lanjutkan transfer?'))">
                                                     @csrf
                                                     <button type="submit"
                                                         class="p-2 rounded-xl text-emerald-500 hover:text-white hover:bg-emerald-500 transition shadow-lg shadow-emerald-100 hover:shadow-emerald-200"
-                                                        title="Setujui & Transfer Uang">
+                                                        title="Cek Status / Setujui & Transfer">
                                                         <svg class="w-5 h-5" fill="none" stroke="currentColor"
                                                             viewBox="0 0 24 24">
                                                             <path stroke-linecap="round" stroke-linejoin="round"

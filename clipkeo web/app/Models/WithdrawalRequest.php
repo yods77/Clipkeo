@@ -27,9 +27,6 @@ class WithdrawalRequest extends Model
 
     public function transaction()
     {
-        // Kita cari transaksi yang reference_id-nya mengandung ID WD ini
-        return $this->hasOne(Transaction::class, 'user_id', 'user_id')
-            ->where('type', 'withdrawal')
-            ->latest();
+        return $this->hasOne(Transaction::class, 'withdrawal_request_id');
     }
 }

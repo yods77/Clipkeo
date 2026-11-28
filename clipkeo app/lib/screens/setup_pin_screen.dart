@@ -21,10 +21,8 @@ class _SetupPinScreenState extends State<SetupPinScreen> {
   void _submitSetup() async {
     String pin = _pinController.text;
 
-    print("👆 [UI] Tombol Simpan PIN ditekan. Input: $pin");
 
     if (pin.length != 6) {
-      print("⚠️ [UI] Validasi Gagal: PIN bukan 6 digit");
       setState(() => _errorMessage = "PIN harus 6 digit angka");
       return;
     }

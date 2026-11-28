@@ -481,7 +481,7 @@ class SubmissionController extends Controller
 
                     Transaction::create([
                         'user_id' => $clipper->id,
-                        'type' => 'reward',
+                        'type' => Transaction::TYPE_BOUNTY_PRIZE,
                         'amount' => $payAmount,
                         'description' => "Reward $bounty->title ($note)",
                         'status' => 'success',
@@ -493,7 +493,7 @@ class SubmissionController extends Controller
 
                 Transaction::create([
                     'user_id' => $bounty->publisher_id,
-                    'type' => 'payout',
+                    'type' => Transaction::TYPE_BOUNTY_PRIZE,
                     'amount' => $payAmount,
                     'description' => "Payout Clipper ($note)",
                     'status' => 'success',

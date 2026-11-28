@@ -50,6 +50,11 @@
             box-shadow: 0 0 15px rgba(239, 68, 68, 0.1);
         }
 
+        .glass-input option {
+            background-color: #0f172a;
+            color: white;
+        }
+
         /* Custom Radio Card */
         .role-radio:checked+div {
             border-color: #ef4444;
@@ -235,7 +240,7 @@
                     @csrf
                     <div class="grid grid-cols-2 gap-4 mb-6">
                         <label class="cursor-pointer relative group">
-                            <input type="radio" name="role" value="clipper" class="role-radio sr-only" checked>
+                            <input type="radio" name="role" value="clipper" class="role-radio sr-only" @checked(old('role', 'clipper') === 'clipper')>
                             <div
                                 class="border border-white/10 bg-white/5 rounded-2xl p-4 text-center hover:bg-white/10 transition-all h-full">
                                 <div
@@ -258,7 +263,7 @@
                             </div>
                         </label>
                         <label class="cursor-pointer relative group">
-                            <input type="radio" name="role" value="publisher" class="role-radio sr-only">
+                            <input type="radio" name="role" value="publisher" class="role-radio sr-only" @checked(old('role') === 'publisher')>
                             <div
                                 class="border border-white/10 bg-white/5 rounded-2xl p-4 text-center hover:bg-white/10 transition-all h-full">
                                 <div
@@ -285,17 +290,69 @@
                     <div>
                         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Nama
                             Lengkap</label>
-                        <input id="name" name="name" type="text" required
-                            class="glass-input block w-full px-4 py-3 rounded-xl" placeholder="Full Name">
+                        <input id="name" name="name" type="text" required value="{{ old('name') }}"
+                            class="glass-input block w-full px-4 py-3 rounded-xl" placeholder="Full Name" autocomplete="name">
                         <x-input-error :messages="$errors->get('name')" class="mt-2" />
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Nomor HP</label>
+                        <input id="phone_number" name="phone_number" type="tel" required maxlength="30"
+                            value="{{ old('phone_number') }}"
+                            class="glass-input block w-full px-4 py-3 rounded-xl"
+                            placeholder="Contoh: 081234567890" autocomplete="tel">
+                        <x-input-error :messages="$errors->get('phone_number')" class="mt-2" />
                     </div>
 
                     <div>
                         <label
                             class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Email</label>
-                        <input id="email" name="email" type="email" required
-                            class="glass-input block w-full px-4 py-3 rounded-xl" placeholder="email@example.com">
+                        <input id="email" name="email" type="email" required value="{{ old('email') }}"
+                            class="glass-input block w-full px-4 py-3 rounded-xl" placeholder="email@example.com" autocomplete="email">
                         <x-input-error :messages="$errors->get('email')" class="mt-2" />
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Jenis Kelamin</label>
+                            <select id="gender" name="gender" required class="glass-input block w-full px-4 py-3 rounded-xl">
+                                <option value="">Pilih jenis kelamin</option>
+                                <option value="Laki-laki" @selected(old('gender') === 'Laki-laki')>Laki-laki</option>
+                                <option value="Perempuan" @selected(old('gender') === 'Perempuan')>Perempuan</option>
+                            </select>
+                            <x-input-error :messages="$errors->get('gender')" class="mt-2" />
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Tanggal Lahir</label>
+                            <input id="birthday" name="birthday" type="date" required max="{{ now()->format('Y-m-d') }}"
+                                value="{{ old('birthday') }}" class="glass-input block w-full px-4 py-3 rounded-xl">
+                            <x-input-error :messages="$errors->get('birthday')" class="mt-2" />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Provinsi</label>
+                        <select id="province" name="province" required class="glass-input block w-full px-4 py-3 rounded-xl">
+                            <option value="">Pilih provinsi</option>
+                            @foreach ($provinces as $province)
+                                <option value="{{ $province->id }}" @selected((string) old('province') === (string) $province->id)>{{ $province->name }}</option>
+                            @endforeach
+                        </select>
+                        <x-input-error :messages="$errors->get('province')" class="mt-2" />
+                        @if ($provinces->isEmpty())
+                            <p class="text-xs text-amber-400 mt-2">Data provinsi belum tersedia. Silakan hubungi administrator untuk menyiapkan data wilayah.</p>
+                        @endif
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Kota/Kabupaten</label>
+                        <select id="city" name="city" required class="glass-input block w-full px-4 py-3 rounded-xl" @disabled($regencies->isEmpty())>
+                            <option value="">Pilih kota/kabupaten</option>
+                            @foreach ($regencies as $regency)
+                                <option value="{{ $regency->id }}" @selected((string) old('city') === (string) $regency->id)>{{ $regency->name }}</option>
+                            @endforeach
+                        </select>
+                        <x-input-error :messages="$errors->get('city')" class="mt-2" />
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
@@ -327,6 +384,55 @@
             </div>
         </div>
     </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const provinceSelect = document.getElementById('province');
+            const citySelect = document.getElementById('city');
+
+            if (!provinceSelect || !citySelect) {
+                return;
+            }
+
+            const regenciesUrlTemplate = @json(route('register.regencies', ['province' => '__province__']));
+
+            provinceSelect.addEventListener('change', async () => {
+                const provinceId = provinceSelect.value;
+                citySelect.disabled = true;
+                citySelect.innerHTML = '<option value="">Memuat kota/kabupaten...</option>';
+
+                if (!provinceId) {
+                    citySelect.innerHTML = '<option value="">Pilih kota/kabupaten</option>';
+                    return;
+                }
+
+                try {
+                    const url = regenciesUrlTemplate.replace('__province__', encodeURIComponent(provinceId));
+                    const response = await fetch(url, {
+                        headers: { 'Accept': 'application/json' }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Gagal memuat data wilayah.');
+                    }
+
+                    const regencies = await response.json();
+                    citySelect.innerHTML = '<option value="">Pilih kota/kabupaten</option>';
+
+                    regencies.forEach((regency) => {
+                        const option = document.createElement('option');
+                        option.value = regency.id;
+                        option.textContent = regency.name;
+                        citySelect.appendChild(option);
+                    });
+
+                    citySelect.disabled = regencies.length === 0;
+                } catch (error) {
+                    citySelect.innerHTML = '<option value="">Data kota/kabupaten gagal dimuat</option>';
+                    citySelect.disabled = true;
+                }
+            });
+        });
+    </script>
 </body>
 
 </html>

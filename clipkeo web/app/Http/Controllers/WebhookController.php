@@ -6,9 +6,11 @@ use Illuminate\Http\Request;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\WithdrawalRequest;
-use App\Notifications\FinancialStatusNotification; 
+use App\Notifications\AdminActivityNotification;
+use App\Notifications\FinancialStatusNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Services\WithdrawalLedgerService;
 
 class WebhookController extends Controller
 {
@@ -48,8 +50,12 @@ class WebhookController extends Controller
 
         // [LANGKAH 2] Ambil Data Transaksi
         $data = $request->all();
-        $externalId = $data['external_id'] ?? ''; 
+        $externalId = $data['external_id'] ?? '';
         $status = $data['status'] ?? '';
+
+        if (!is_string($externalId) || $externalId === '' || !is_string($status)) {
+            return response()->json(['message' => 'Invalid webhook payload'], 200);
+        }
 
         // Log untuk monitoring di storage/logs/laravel.log
         Log::info('Webhook Xendit Masuk:', ['id' => $externalId, 'status' => $status]);
@@ -79,150 +85,257 @@ class WebhookController extends Controller
      */
     private function handleWithdrawal($externalId, $status, $data)
     {
-        // --------------------------------------------------------------------
-        // KONDISI 1: TRANSFER BERHASIL (COMPLETED)
-        // --------------------------------------------------------------------
-        if ($status === 'COMPLETED') {
-            DB::transaction(function () use ($externalId) {
-                
-                // A. Update Status di Tabel Transaksi (Laporan Keuangan)
-                Transaction::where('reference_id', $externalId)->update([
-                    'status' => 'success', 
-                    'paid_at' => now(),
-                    'description' => 'Withdrawal Berhasil Ditransfer'
-                ]);
+        $withdrawalId = null;
 
-                // B. Update Status di Tabel Permintaan (WithdrawalRequest)
-                // Format ID kita: WD-{Timestamp}-{ID_Asli}
-                $parts = explode('-', $externalId);
-                
-                if (count($parts) >= 3) {
-                    $wdId = end($parts); // Mengambil angka terakhir sebagai ID
-                    
-                    $wd = WithdrawalRequest::find($wdId);
-                    
-                    // Pastikan hanya memproses yang statusnya masih pending/processing
-                    if ($wd && in_array($wd->status, ['pending', 'processing'])) {
-                        
-                        // Tandai request selesai
-                        $wd->update(['status' => 'completed']);
-
-                        // C. Kirim Notifikasi Sukses ke User (Clipper)
-                        try {
-                            $wd->user->notify(new FinancialStatusNotification($wd, 'withdrawal', 'success'));
-                        } catch (\Exception $e) {
-                            Log::error('Gagal kirim notif withdrawal success: ' . $e->getMessage());
-                        }
-                    }
-                }
-            });
-            Log::info('Withdrawal Sukses: ' . $externalId);
+        // New references use WD-{withdrawal_id}; legacy references used
+        // WD-{timestamp}-{withdrawal_id}. Both formats remain supported.
+        if (preg_match('/^WD-(\\d+)$/', (string) $externalId, $matches)) {
+            $withdrawalId = (int) $matches[1];
+        } elseif (preg_match('/^WD-[A-Za-z0-9_-]+-(\\d+)$/', (string) $externalId, $matches)) {
+            // Current environment-prefixed IDs and legacy WD-{timestamp}-{id}.
+            $withdrawalId = (int) $matches[1];
         }
-        
-        // --------------------------------------------------------------------
-        // KONDISI 2: TRANSFER GAGAL (FAILED) -> SAFETY NET / REFUND
-        // --------------------------------------------------------------------
-        elseif ($status === 'FAILED') {
-            DB::transaction(function () use ($externalId, $data) {
-                // Cari data transaksi berdasarkan ID Xendit
-                $trx = Transaction::where('reference_id', $externalId)->first();
-                
-                // Pastikan transaksi ada dan belum ditandai failed sebelumnya
-                if ($trx && $trx->status !== 'failed') {
-                    
-                    // A. Update Status Transaksi jadi Failed
-                    $trx->update([
-                        'status' => 'failed', 
-                        'description' => 'Gagal: ' . ($data['failure_code'] ?? 'Bank Error')
+
+        if (!$withdrawalId) {
+            Log::warning('Webhook withdrawal diabaikan karena external_id tidak valid.', [
+                'external_id' => $externalId,
+            ]);
+
+            return response()->json(['message' => 'Invalid withdrawal reference'], 200);
+        }
+
+        $withdrawalRecord = WithdrawalRequest::with('transaction')->find($withdrawalId);
+        if (!$withdrawalRecord) {
+            Log::warning('Webhook withdrawal merujuk request yang tidak ditemukan.', [
+                'withdrawal_id' => $withdrawalId,
+                'external_id' => $externalId,
+            ]);
+
+            return response()->json(['message' => 'Withdrawal not found'], 200);
+        }
+
+        $storedExternalId = $withdrawalRecord->transaction?->reference_id;
+        $appEnvironment = preg_replace('/[^A-Za-z0-9_-]/', '-', (string) config('app.env', 'production'));
+        $currentExternalId = 'WD-' . $appEnvironment . '-' . $withdrawalId;
+        $legacySimpleExternalId = 'WD-' . $withdrawalId;
+
+        // Only the saved reference or this environment's deterministic ID may
+        // settle a withdrawal. This blocks cross-environment ID collisions.
+        if ($externalId !== $storedExternalId
+            && $externalId !== $currentExternalId
+            && $externalId !== $legacySimpleExternalId) {
+            Log::critical('Webhook withdrawal ditolak karena referensinya tidak cocok.', [
+                'withdrawal_id' => $withdrawalId,
+                'external_id' => $externalId,
+                'stored_external_id' => $storedExternalId,
+                'expected_external_id' => $currentExternalId,
+            ]);
+
+            return response()->json(['message' => 'Withdrawal reference mismatch'], 200);
+        }
+
+        $ledger = app(WithdrawalLedgerService::class);
+        $providerId = $data['id'] ?? $data['disbursement_id'] ?? null;
+
+        if ($status === 'COMPLETED') {
+            $withdrawal = $ledger->markCompleted(
+                $withdrawalId,
+                (string) $externalId,
+                $providerId ? (string) $providerId : null
+            );
+
+            if ($withdrawal) {
+                try {
+                    $withdrawal->user?->notify(
+                        new FinancialStatusNotification($withdrawal, 'withdrawal', 'success')
+                    );
+                } catch (\Throwable $e) {
+                    Log::warning('Gagal mengirim notifikasi withdrawal berhasil.', [
+                        'withdrawal_id' => $withdrawalId,
+                        'exception' => $e->getMessage(),
                     ]);
-                    
-                    // B. [CRITICAL] REFUND SALDO USER
-                    // Uang dikembalikan ke dompet user karena transfer gagal
-                    $user = User::find($trx->user_id);
-                    if ($user) {
-                        $user->increment('wallet_balance', $trx->amount);
-                    }
-
-                    // C. Update Status Request jadi Rejected
-                    $parts = explode('-', $externalId);
-                    if (count($parts) >= 3) {
-                        $wdId = end($parts);
-                        $wd = WithdrawalRequest::find($wdId);
-                        if ($wd) {
-                            $wd->update([
-                                'status' => 'rejected',
-                                'rejection_reason' => 'Bank Error: ' . ($data['failure_code'] ?? 'Unknown')
-                            ]);
-
-                            // D. Kirim Notifikasi Gagal ke User
-                            try {
-                                $wd->user->notify(new FinancialStatusNotification($wd, 'withdrawal', 'rejected', 'Gagal Transfer Bank'));
-                            } catch (\Exception $e) {
-                                Log::error('Gagal kirim notif withdrawal fail: ' . $e->getMessage());
-                            }
-                        }
-                    }
                 }
-            });
-            Log::warning('Withdrawal Gagal & Refunded: ' . $externalId);
+
+                Log::info('Withdrawal selesai dikonfirmasi Xendit.', [
+                    'withdrawal_id' => $withdrawalId,
+                    'external_id' => $externalId,
+                ]);
+            } elseif ($withdrawalRecord->status !== 'completed') {
+                // A late success after a refund may mean the recipient was paid
+                // while the wallet was already credited back. Do not debit again
+                // automatically; flag it for manual financial reconciliation.
+                Log::critical('Xendit melaporkan withdrawal berhasil setelah status lokal mencapai kondisi terminal non-completed.', [
+                    'withdrawal_id' => $withdrawalId,
+                    'external_id' => $externalId,
+                    'local_status' => $withdrawalRecord->status,
+                    'provider_id' => $providerId,
+                ]);
+            }
+        } elseif ($status === 'FAILED') {
+            $failureCode = (string) ($data['failure_code'] ?? 'BANK_ERROR');
+
+            $withdrawal = $ledger->markFailed(
+                $withdrawalId,
+                'Bank Error: ' . $failureCode,
+                (string) $externalId
+            );
+
+            if ($withdrawal) {
+                try {
+                    $withdrawal->user?->notify(new FinancialStatusNotification(
+                        $withdrawal,
+                        'withdrawal',
+                        'rejected',
+                        'Transfer gagal (' . $failureCode . '). Seluruh nominal termasuk biaya admin telah dikembalikan.'
+                    ));
+                } catch (\Throwable $e) {
+                    Log::warning('Gagal mengirim notifikasi refund withdrawal.', [
+                        'withdrawal_id' => $withdrawalId,
+                        'exception' => $e->getMessage(),
+                    ]);
+                }
+
+                Log::warning('Withdrawal gagal; pengembalian penuh telah dicatat.', [
+                    'withdrawal_id' => $withdrawalId,
+                    'external_id' => $externalId,
+                    'failure_code' => $failureCode,
+                ]);
+            } elseif ($withdrawalRecord->status === 'completed') {
+                Log::critical('Xendit melaporkan withdrawal FAILED setelah ledger lokal COMPLETED.', [
+                    'withdrawal_id' => $withdrawalId,
+                    'external_id' => $externalId,
+                    'provider_id' => $providerId,
+                ]);
+            }
         }
 
         return response()->json(['message' => 'Withdrawal Processed'], 200);
     }
 
-    /**
-     * ============================================================================
-     * PRIVATE: HANDLE DEPOSIT (LOGIKA TOP UP SALDO)
-     * ============================================================================
-     * Menangani logika saat Publisher melakukan pembayaran (Top Up).
-     * - Jika SUKSES: Tambah saldo wallet publisher otomatis.
-     */
     private function handleDeposit($externalId, $status, $data)
     {
         // --------------------------------------------------------------------
         // KONDISI 1: PEMBAYARAN DITERIMA (PAID / SETTLED)
         // --------------------------------------------------------------------
         if ($status === 'PAID' || $status === 'SETTLED') {
-            DB::transaction(function () use ($externalId, $data) {
-                $transaction = Transaction::where('reference_id', $externalId)->first();
+            $processedTransaction = DB::transaction(function () use ($externalId, $data) {
+                // Kunci baris transaksi agar webhook berulang yang datang
+                // bersamaan tidak dapat menambah saldo lebih dari satu kali.
+                $transaction = Transaction::where('reference_id', $externalId)
+                    ->lockForUpdate()
+                    ->first();
 
-                // Cek Idempotency: Pastikan saldo tidak ditambah dua kali
-                if ($transaction && $transaction->status !== 'success') {
-                    
-                    // A. Update Status Transaksi jadi Success
-                    $transaction->update([
-                        'status' => 'success',
-                        'payment_channel' => $data['payment_method'] ?? 'Xendit',
-                        'paid_at' => now(),
-                        'description' => 'Deposit Berhasil (Auto) via ' . ($data['payment_method'] ?? 'Xendit'),
+                if (!$transaction) {
+                    Log::warning('Webhook deposit tidak menemukan transaksi lokal.', [
+                        'external_id' => $externalId,
                     ]);
-                    
-                    // B. Tambah Saldo ke Dompet Publisher
-                    $user = User::find($transaction->user_id);
-                    if ($user) {
-                        $user->increment('wallet_balance', $transaction->amount);
-                        
-                        // C. Kirim Notifikasi Deposit Sukses
-                        try {
-                            $user->notify(new FinancialStatusNotification($transaction, 'deposit', 'success'));
-                        } catch (\Exception $e) {
-                            Log::error('Gagal kirim notif deposit: ' . $e->getMessage());
-                        }
-                    }
+
+                    return null;
                 }
+
+                // Hanya transisi pending -> success yang boleh memproses saldo
+                // dan membuat notifikasi. Callback duplikat diabaikan.
+                if ($transaction->status === 'success') {
+                    Log::info('Webhook deposit duplikat diabaikan.', [
+                        'external_id' => $externalId,
+                    ]);
+
+                    return null;
+                }
+
+                if ($transaction->status !== 'pending') {
+                    Log::warning('Webhook deposit diabaikan karena status transaksi bukan pending.', [
+                        'external_id' => $externalId,
+                        'local_status' => $transaction->status,
+                    ]);
+
+                    return null;
+                }
+
+                $user = User::whereKey($transaction->user_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$user) {
+                    Log::error('Webhook deposit tidak dapat diproses karena pemilik transaksi tidak ditemukan.', [
+                        'external_id' => $externalId,
+                        'user_id' => $transaction->user_id,
+                    ]);
+
+                    // Rollback status transaksi agar Xendit dapat mencoba
+                    // mengirim webhook kembali setelah masalah diperbaiki.
+                    throw new \RuntimeException('Deposit owner not found.');
+                }
+
+                $paymentMethod = $data['payment_method'] ?? 'Xendit';
+                if (!is_string($paymentMethod) || $paymentMethod === '') {
+                    $paymentMethod = 'Xendit';
+                }
+
+                // A. Tandai transaksi sebagai berhasil.
+                $transaction->update([
+                    'status' => 'success',
+                    'payment_channel' => $paymentMethod,
+                    'paid_at' => now(),
+                    'description' => 'Deposit Berhasil (Auto) via ' . $paymentMethod,
+                ]);
+
+                // B. Tambahkan saldo publisher tepat satu kali.
+                $user->increment('wallet_balance', $transaction->amount);
+
+                // Muat relasi user agar notifikasi admin dapat menampilkan
+                // identitas publisher tanpa query tambahan yang ambigu.
+                $transaction->setRelation('user', $user);
+
+                // C. Simpan notifikasi internal untuk seluruh akun admin.
+                // Notifikasi database berada dalam transaksi DB yang sama,
+                // sehingga status deposit, saldo, dan notifikasi konsisten.
+                $admins = User::where('role', 'admin')->get();
+
+                foreach ($admins as $admin) {
+                    $admin->notify(new AdminActivityNotification($transaction, 'deposit_success'));
+                }
+
+                if ($admins->isEmpty()) {
+                    Log::warning('Deposit berhasil, tetapi tidak ada akun admin aktif untuk menerima notifikasi.', [
+                        'external_id' => $externalId,
+                    ]);
+                }
+
+                // D. Pertahankan notifikasi sukses untuk publisher.
+                try {
+                    $user->notify(new FinancialStatusNotification($transaction, 'deposit', 'success'));
+                } catch (\Throwable $e) {
+                    Log::error('Gagal mengirim notifikasi deposit kepada publisher.', [
+                        'external_id' => $externalId,
+                        'exception' => $e->getMessage(),
+                    ]);
+                }
+
+                return $transaction;
             });
-            Log::info('Deposit Sukses: ' . $externalId);
+
+            if ($processedTransaction) {
+                Log::info('Deposit berhasil dikonfirmasi Xendit dan notifikasi admin dibuat.', [
+                    'external_id' => $externalId,
+                    'transaction_id' => $processedTransaction->id,
+                    'user_id' => $processedTransaction->user_id,
+                    'amount' => $processedTransaction->amount,
+                ]);
+            }
         }
-        
+
         // --------------------------------------------------------------------
         // KONDISI 2: PEMBAYARAN KEDALUWARSA (EXPIRED)
         // --------------------------------------------------------------------
         if ($status === 'EXPIRED') {
             $transaction = Transaction::where('reference_id', $externalId)->first();
-            
+
             if ($transaction && $transaction->status === 'pending') {
-                // Tandai transaksi gagal karena user tidak membayar tepat waktu
-                $transaction->update(['status' => 'failed', 'description' => 'Pembayaran Expired']);
+                $transaction->update([
+                    'status' => 'failed',
+                    'description' => 'Pembayaran Expired',
+                ]);
             }
         }
 

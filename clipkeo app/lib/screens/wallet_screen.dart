@@ -1,6 +1,5 @@
 import 'dart:convert'; // Tambahan untuk decode JSON
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Untuk SystemUiOverlay
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:solar_icons/solar_icons.dart';
@@ -53,21 +52,17 @@ class _WalletScreenState extends State<WalletScreen> {
     try {
       final data = await _walletService.getWalletDashboard();
       if (mounted) setState(() => _walletData = data);
-    } catch (e) {
-      print("Error Wallet: $e");
+    } catch (_) {
+      // Jangan tulis detail respons/API ke log produksi.
     }
   }
 
   // 2. Ambil Data User (Nama & Bank)
   Future<void> _fetchUserProfile() async {
-    print("🕵️‍♂️ [DETEKTIF] Memulai Penyelidikan Data User...");
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('token');
-
-      print(
-        "🔑 [DETEKTIF] Token ditemukan: ${token != null ? "YA (Ada isinya)" : "TIDAK (Null)"}",
-      );
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      if (token == null || token.isEmpty) return;
 
       final response = await http.get(
         Uri.parse('${AppConfig.baseUrl}/user'),
@@ -77,53 +72,29 @@ class _WalletScreenState extends State<WalletScreen> {
         },
       );
 
-      print("📡 [DETEKTIF] Status Server: ${response.statusCode}");
-      print("📦 [DETEKTIF] Data Mentah (Body): ${response.body}");
+      if (response.statusCode != 200) return;
 
-      if (response.statusCode == 200) {
-        final json = jsonDecode(response.body);
-        final user = json['data'] ?? json;
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) return;
 
-        print("🧐 [DETEKTIF] Menganalisa Data User:");
-        print("    - Name di JSON: ${user['name']}");
-        print("    - Bank (Key: bank_name): ${user['bank_name']}");
-        print("    - Bank (Key: bank): ${user['bank']}");
-        print(
-          "    - Rekening (Key: account_number): ${user['account_number']}",
-        );
-        print("    - Rekening (Key: bank_number): ${user['bank_number']}");
+      final userData = decoded['data'] ?? decoded;
+      if (userData is! Map) return;
 
-        if (mounted) {
-          setState(() {
-            // Logika Pengambilan Nama
-            _displayName = user['name'] ?? "Clipkeo Member";
+      final name = (userData['name'] ?? 'Clipkeo Member').toString();
+      final bank = (userData['bank_name'] ?? userData['bank'])?.toString();
+      final accountNumber =
+          (userData['account_number'] ?? userData['bank_number'])?.toString();
 
-            // Logika Pengambilan Bank (Cari di semua kemungkinan key)
-            String? bank = user['bank_name'] ?? user['bank'];
-
-            // Logika Pengambilan Rekening
-            String? rek = user['account_number'] ?? user['bank_number'];
-
-            if (bank != null && bank.isNotEmpty) {
-              _bankName = bank;
-              print("✅ [DETEKTIF] Bank berhasil diset ke: $_bankName");
-            } else {
-              print("⚠️ [DETEKTIF] Bank kosong/null dari server");
-            }
-
-            if (rek != null && rek.isNotEmpty) {
-              _accountNumber = rek;
-              print("✅ [DETEKTIF] Rekening berhasil diset ke: $_accountNumber");
-            } else {
-              print("⚠️ [DETEKTIF] Rekening kosong/null dari server");
-            }
-          });
+      if (!mounted) return;
+      setState(() {
+        _displayName = name;
+        if (bank != null && bank.isNotEmpty) _bankName = bank;
+        if (accountNumber != null && accountNumber.isNotEmpty) {
+          _accountNumber = accountNumber;
         }
-      } else {
-        print("❌ [DETEKTIF] Gagal ambil data. Kode error server.");
-      }
-    } catch (e) {
-      print("❌ [DETEKTIF] ERROR CRASH: $e");
+      });
+    } catch (_) {
+      // Pertahankan nilai default jika profil gagal dimuat.
     }
   }
 
@@ -443,7 +414,16 @@ class _WalletScreenState extends State<WalletScreen> {
       children: transactions.asMap().entries.map((entry) {
         int index = entry.key; // Index urutan (0, 1, 2...)
         var trx = entry.value; // Data transaksi asli
-        bool isWithdraw = trx['type'] != 'reward';
+        final String transactionType = (trx['type'] ?? '').toString();
+        final String userRole = (_walletData['role'] ?? 'clipper').toString();
+        final bool isIncome = transactionType == 'deposit' ||
+            transactionType == 'bounty_refund' ||
+            transactionType == 'refund' ||
+            transactionType == 'withdrawal_refund' ||
+            transactionType == 'reward' ||
+            (transactionType == 'bounty_prize' && userRole == 'clipper');
+        final bool isWithdraw = !isIncome;
+        final bool isFailed = (trx['status'] ?? '').toString() == 'failed';
         return FadeInUp(
           // 🔥 2. Bungkus dengan FadeInUp
           // 🔥 3. Atur delay berdasarkan index (makin ke bawah makin lambat munculnya)
@@ -481,7 +461,8 @@ class _WalletScreenState extends State<WalletScreen> {
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 13.sp,
-                          color: Colors.black,
+                          color: isFailed ? Colors.grey[600] : Colors.black,
+                          decoration: isFailed ? TextDecoration.lineThrough : TextDecoration.none,
                           letterSpacing: -0.3,
                         ),
                       ),
@@ -496,6 +477,17 @@ class _WalletScreenState extends State<WalletScreen> {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
+                      if (isFailed) ...[
+                        SizedBox(height: 2.h),
+                        Text(
+                          'GAGAL',
+                          style: TextStyle(
+                            fontSize: 9.sp,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -506,7 +498,10 @@ class _WalletScreenState extends State<WalletScreen> {
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
                     fontSize: 12.sp,
-                    color: isWithdraw ? Colors.red[700] : Colors.green[700],
+                    color: isFailed
+                        ? Colors.grey[600]
+                        : (isWithdraw ? Colors.red[700] : Colors.green[700]),
+                    decoration: isFailed ? TextDecoration.lineThrough : TextDecoration.none,
                   ),
                 ),
               ],

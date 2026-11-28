@@ -110,9 +110,9 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
     }
 
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? storedUserId = prefs.getString('user_id');
+    String? token = prefs.getString('token');
 
-    if (storedUserId == null) {
+    if (token == null || token.isEmpty) {
       _showSnack("Sesi habis. Silakan login ulang aplikasi.", Colors.red);
       return;
     }
@@ -124,8 +124,11 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
         "${AppConfig.baseUrl}/campaigns/${widget.campaignId}/submit",
       );
       var request = http.MultipartRequest('POST', uri);
+      request.headers.addAll({
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json',
+      });
 
-      request.fields['user_id'] = storedUserId;
       request.fields['linked_account_id'] = _selectedAccountId!;
       request.fields['video_link'] = _linkController.text;
       request.fields['current_views'] = _viewsController.text;
@@ -179,7 +182,6 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
       }
       // --- END: UPDATE LOGIKA ---
     } catch (e) {
-      print("Error System: $e");
       _showSnack("Koneksi Error: $e", Colors.red);
     } finally {
       if (mounted) setState(() => isSubmitting = false);
@@ -320,8 +322,6 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? token = prefs.getString('token');
 
-      print("🚀 [SOSMED] Mengambil data akun sosmed...");
-      print("🔗 URL: ${AppConfig.baseUrl}/api/my-social-accounts");
 
       final response = await http.get(
         Uri.parse("${AppConfig.baseUrl}/my-social-accounts"),
@@ -331,12 +331,9 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
         },
       );
 
-      print("📥 [SOSMED] Status Code: ${response.statusCode}");
-      print("📄 [SOSMED] Body: ${response.body}");
 
       if (response.statusCode == 200) {
         var json = jsonDecode(response.body);
-        print("📦 [DATA MENTAH]: ${json['data']}");
         if (mounted) {
           setState(() {
             _mySocialAccounts = json['data'];
@@ -350,15 +347,13 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
         }
       } else {
         // ⚠️ JIKA SERVER ERROR (404, 500, 401)
-        print("⚠️ [SOSMED] Gagal ambil data. Server error.");
         if (mounted)
           setState(
             () => _isLoadingAccounts = false,
           ); // ✅ MATIKAN LOADING (Gagal)
       }
-    } catch (e) {
-      // ❌ JIKA KONEKSI PUTUS/ERROR KODING
-      print("❌ [SOSMED ERROR] $e");
+    } catch (_) {
+      // Handle kegagalan koneksi tanpa mencatat respons atau data akun ke log.
       if (mounted)
         setState(() => _isLoadingAccounts = false); // ✅ MATIKAN LOADING (Error)
     }
@@ -1152,7 +1147,6 @@ class _SubmissionFormScreenState extends State<SubmissionFormScreen> {
   Widget _getSocialIcon(String provider) {
     String p = provider.toLowerCase();
 
-    print("🔍 Cek Logo untuk Provider: '$p'");
 
     if (p.contains('tiktok')) {
       return const FaIcon(

@@ -1,50 +1,144 @@
 import 'dart:convert';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../config.dart';
 
-/*
-|--------------------------------------------------------------------------
-| WALLET SERVICE (UPDATED)
-|--------------------------------------------------------------------------
-| Mengelola Saldo, Request Withdraw, dan Data Bank User.
-*/
-class WalletService {
-  // ⚠️ Pastikan IP ini sesuai dengan IP Laptop/Server Laravel Bosku
-  final String baseUrl = AppConfig.baseUrl;
+enum WithdrawalRequestStatus {
+  success,
+  rejected,
+  uncertain,
+  pendingRequestMismatch,
+}
 
-Future<Map<String, String>> _getHeaders() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? token = prefs.getString('token');
-    print("🔑 [TOKEN] Menggunakan Token: $token"); // CCTV TOKEN
-    return {
-      'Authorization': 'Bearer $token',
-      'Accept': 'application/json',
-    };
+class WithdrawalRequestResult {
+  final WithdrawalRequestStatus status;
+  final String message;
+  final int? withdrawalId;
+  final String? withdrawalStatus;
+
+  const WithdrawalRequestResult({
+    required this.status,
+    required this.message,
+    this.withdrawalId,
+    this.withdrawalStatus,
+  });
+
+  bool get isSuccess => status == WithdrawalRequestStatus.success;
+}
+
+class WalletService {
+  static const String _pendingWithdrawalStorageKeyPrefix =
+      'wallet_pending_withdrawal_attempt_';
+
+  final String baseUrl = AppConfig.baseUrl;
+  final http.Client _client;
+
+  WalletService({http.Client? client}) : _client = client ?? http.Client();
+
+  Future<Map<String, String>> _getHeaders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    final headers = <String, String>{'Accept': 'application/json'};
+
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    return headers;
+  }
+
+  String _createIdempotencyKey() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+
+    // RFC 4122 UUID v4 variant and version bits.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    final hex = bytes
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+        '${hex.substring(20, 32)}';
+  }
+
+  String _pendingStorageKeyFor(
+    Map<String, String> headers, {
+    String? userId,
+  }) {
+    final authorization = headers['Authorization'];
+    if (authorization == null || authorization.isEmpty) {
+      throw StateError('Authenticated user is required for pending withdrawal state.');
+    }
+
+    // Prefer the stable account ID so the pending key survives token renewal
+    // and logout/login. Fall back to a token fingerprint for legacy sessions.
+    final accountIdentity = userId != null && userId.trim().isNotEmpty
+        ? 'user_$userId'
+        : sha256.convert(utf8.encode(authorization)).toString();
+
+    return '$_pendingWithdrawalStorageKeyPrefix$accountIdentity';
+  }
+
+  Future<Map<String, dynamic>?> _readPendingWithdrawalAttempt(
+    String storageKey,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(storageKey);
+
+    if (raw == null) return null;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {
+      // Keep malformed state rather than silently creating a new key. A new
+      // withdrawal must not be sent while an earlier request is unresolved.
+    }
+
+    return <String, dynamic>{'invalid': true};
+  }
+
+  Future<Map<String, dynamic>?> getPendingWithdrawalAttempt() async {
+    final headers = await _getHeaders();
+    if (!headers.containsKey('Authorization')) return null;
+
+    final prefs = await SharedPreferences.getInstance();
+    final storageKey = _pendingStorageKeyFor(
+      headers,
+      userId: prefs.getString('user_id'),
+    );
+
+    return _readPendingWithdrawalAttempt(storageKey);
+  }
+
+  Future<void> _clearPendingWithdrawalAttempt(String storageKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(storageKey);
   }
 
   // --- 1. CEK STATUS PIN ---
   Future<bool> checkPinStatus() async {
     try {
-      print("🚀 [CHECK PIN] Sedang mengecek status PIN ke Server...");
       final headers = await _getHeaders();
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$baseUrl/wallet/check-pin'),
         headers: headers,
       );
 
-      print("📥 [CHECK PIN] Response Code: ${response.statusCode}");
-      print("📄 [CHECK PIN] Body: ${response.body}");
-
       if (response.statusCode == 200) {
-        var data = jsonDecode(response.body);
-        bool status = data['has_pin'] ?? false;
-        print("✅ [CHECK PIN] Hasil: User ${status ? 'SUDAH' : 'BELUM'} punya PIN");
-        return status;
+        final data = jsonDecode(response.body);
+        return data['has_pin'] ?? false;
       }
+
       return false;
-    } catch (e) {
-      print("❌ [CHECK PIN ERROR]: $e");
+    } catch (_) {
       return false;
     }
   }
@@ -52,9 +146,8 @@ Future<Map<String, String>> _getHeaders() async {
   // --- 2. SETUP PIN BARU ---
   Future<bool> setupPin(String newPin) async {
     try {
-      print("🚀 [SETUP PIN] Mengirim PIN baru ke Server...");
       final headers = await _getHeaders();
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$baseUrl/wallet/setup-pin'),
         headers: headers,
         body: {
@@ -63,118 +156,216 @@ Future<Map<String, String>> _getHeaders() async {
         },
       );
 
-      print("📥 [SETUP PIN] Response Code: ${response.statusCode}");
-      print("📄 [SETUP PIN] Body: ${response.body}");
-
-      if (response.statusCode == 200) {
-        print("✅ [SETUP PIN] Berhasil disimpan!");
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print("❌ [SETUP PIN ERROR]: $e");
+      return response.statusCode == 200;
+    } catch (_) {
       return false;
     }
   }
 
-  /**
-   * -- GET DASHBOARD --
-   * Mengambil saldo dan riwayat transaksi.
-   */
+  // --- 3. GET DASHBOARD ---
   Future<Map<String, dynamic>> getWalletDashboard() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? userId = prefs.getString('user_id');
+      final headers = await _getHeaders();
+      if (!headers.containsKey('Authorization')) return {};
 
-      final response = await http.get(
-        Uri.parse('$baseUrl/wallet/dashboard?user_id=$userId'),
+      final response = await _client.get(
+        Uri.parse('$baseUrl/wallet/dashboard'),
+        headers: headers,
       );
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body)['data'];
       }
+
       return {};
-    } catch (e) {
-      print("Error Wallet: $e");
+    } catch (_) {
       return {};
     }
   }
 
-  /**
-   * -- GET PAYOUT METHODS (FUNGSI BARU) --
-   * Mengambil daftar bank yang tersimpan di database user.
-   * Dipakai di halaman WithdrawInputScreen.
-   */
+  // --- 4. GET PAYOUT METHODS ---
   Future<List<dynamic>> getPayoutMethods() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? userId = prefs.getString('user_id');
+      final headers = await _getHeaders();
+      if (!headers.containsKey('Authorization')) return [];
 
-      // 🔥 FIX SEMENTARA: JIKA NULL, PAKAI ID DUMMY DARI DATABASE 🔥
-      // Saya ambil ID 47 (Derry Anggara) dari screenshot database Bosku
-      if (userId == null) {
-        print("⚠️ User ID Null. Menggunakan ID Testing: 47");
-        userId = "47"; 
-      }
-
-      final response = await http.get(
-        Uri.parse('$baseUrl/payout-methods?user_id=$userId'),
+      final response = await _client.get(
+        Uri.parse('$baseUrl/payout-methods'),
+        headers: headers,
       );
-      
-      print("🕵️ JSON DARI SERVER: ${response.body}");
 
       if (response.statusCode == 200) {
-        var data = jsonDecode(response.body);
-        return data['data'] ?? []; 
-      } else {
-        print("⚠️ Gagal ambil bank: ${response.body}");
-        return [];
+        final data = jsonDecode(response.body);
+        return data['data'] ?? [];
       }
-    } catch (e) {
-      print("❌ Error Koneksi: $e");
+
+      return [];
+    } catch (_) {
       return [];
     }
   }
 
-  /**
-   * -- REQUEST WITHDRAW --
-   * Mengirim permintaan penarikan dana.
-   */
-  Future<bool> requestWithdraw({required String amount, required int methodId}) async {
+  // --- 5. REQUEST WITHDRAW ---
+  // The idempotency key and original payload are persisted before sending.
+  // A retry after timeout/app restart must reuse both values.
+  Future<WithdrawalRequestResult> requestWithdraw({
+    required String amount,
+    required int methodId,
+    required String pin,
+  }) async {
+    final headers = await _getHeaders();
+    if (!headers.containsKey('Authorization')) {
+      return const WithdrawalRequestResult(
+        status: WithdrawalRequestStatus.rejected,
+        message: 'Sesi login tidak ditemukan. Silakan login kembali.',
+      );
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final pendingStorageKey = _pendingStorageKeyFor(
+      headers,
+      userId: prefs.getString('user_id'),
+    );
+    Map<String, dynamic>? pending;
+
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? userId = prefs.getString('user_id');
-      String? token = prefs.getString('token');
+      pending = await _readPendingWithdrawalAttempt(pendingStorageKey);
+    } catch (_) {
+      return const WithdrawalRequestResult(
+        status: WithdrawalRequestStatus.uncertain,
+        message:
+            'Status permintaan sebelumnya belum dapat dibaca. Jangan membuat penarikan baru sebelum statusnya diperiksa.',
+      );
+    }
 
-      print("🚀 [START] MENGIRIM REQUEST WITHDRAW...");
-      print("👉 URL: $baseUrl/wallet/withdraw");
-      print("👉 Token Ada? ${token != null ? 'YA' : 'TIDAK'}");
-      print("👉 Data Kirim: Amount=$amount, Method=$methodId");
+    late final String idempotencyKey;
 
-      final response = await http.post(
-        Uri.parse('$baseUrl/wallet/withdraw'),
-        body: {
-          'user_id': userId,           
-          'amount': amount,            
-          'payout_method_id': methodId.toString(),
-        },
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json', // <--- KUNCI RAHASIANYA!
-        },
+    if (pending != null) {
+      if (pending['invalid'] == true) {
+        return const WithdrawalRequestResult(
+          status: WithdrawalRequestStatus.pendingRequestMismatch,
+          message:
+              'Data percobaan penarikan sebelumnya tidak dapat dibaca. Demi keamanan saldo, pengajuan baru ditahan dan perlu pemeriksaan.',
+        );
+      }
+
+      final pendingAmount = pending['amount']?.toString();
+      final pendingMethodId =
+          int.tryParse(pending['payout_method_id']?.toString() ?? '');
+
+      if (pendingAmount != amount || pendingMethodId != methodId) {
+        return WithdrawalRequestResult(
+          status: WithdrawalRequestStatus.pendingRequestMismatch,
+          message:
+              'Masih ada penarikan yang belum terkonfirmasi sebesar Rp $pendingAmount. Lanjutkan dengan nominal dan rekening yang sama agar tidak terjadi penarikan ganda.',
+        );
+      }
+
+      idempotencyKey = pending['idempotency_key']?.toString() ?? '';
+      if (idempotencyKey.isEmpty) {
+        return const WithdrawalRequestResult(
+          status: WithdrawalRequestStatus.pendingRequestMismatch,
+          message:
+              'Kunci permintaan sebelumnya tidak tersedia. Pengajuan baru ditahan demi keamanan saldo.',
+        );
+      }
+    } else {
+      idempotencyKey = _createIdempotencyKey();
+      final saved = await prefs.setString(
+        pendingStorageKey,
+        jsonEncode({
+          'idempotency_key': idempotencyKey,
+          'amount': amount,
+          'payout_method_id': methodId,
+        }),
       );
 
-      print("📥 [RESPONSE] Status Code: ${response.statusCode}");
-      print("📄 [RESPONSE] Body: ${response.body}");
-      
-      if (response.statusCode == 200) {
-        return true;
-      } else {
-        return false;
+      if (!saved) {
+        return const WithdrawalRequestResult(
+          status: WithdrawalRequestStatus.rejected,
+          message:
+              'Permintaan belum dikirim karena data pengaman tidak dapat disimpan di perangkat.',
+        );
       }
-    } catch (e) {
-      print("❌ [ERROR KONEKSI]: $e");
-      return false;
+    }
+
+    headers['Idempotency-Key'] = idempotencyKey;
+
+    try {
+      final response = await _client
+          .post(
+            Uri.parse('$baseUrl/wallet/withdraw'),
+            body: {
+              'amount': amount,
+              'payout_method_id': methodId.toString(),
+              'pin': pin,
+            },
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 30));
+
+      Map<String, dynamic> responseData = {};
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) responseData = decoded;
+      } catch (_) {
+        // A successful HTTP status is still authoritative even if a proxy
+        // returned an unreadable body; the next wallet refresh can reconcile.
+      }
+
+      if (response.statusCode == 200) {
+        await _clearPendingWithdrawalAttempt(pendingStorageKey);
+
+        return WithdrawalRequestResult(
+          status: WithdrawalRequestStatus.success,
+          message: responseData['message']?.toString() ??
+              'Permintaan penarikan diterima.',
+          withdrawalId: int.tryParse(
+            responseData['data']?['wd_id']?.toString() ?? '',
+          ),
+          withdrawalStatus:
+              responseData['data']?['withdrawal_status']?.toString(),
+        );
+      }
+
+      final message = responseData['message']?.toString() ??
+          'Server belum dapat memproses permintaan penarikan.';
+
+      // A 400 is returned by the controller only after it has checked for
+      // an existing idempotency record. It therefore represents a definitive
+      // rejection before a new withdrawal was committed.
+      if (response.statusCode == 400) {
+        await _clearPendingWithdrawalAttempt(pendingStorageKey);
+
+        return WithdrawalRequestResult(
+          status: WithdrawalRequestStatus.rejected,
+          message: message,
+        );
+      }
+
+      // Preserve the key for 401/422 as well: PIN or validation checks run
+      // before the server looks up an earlier committed request. Clearing it
+      // here could turn a retry into a second debit. 409, 429 and 5xx also
+      // require the original key to remain available.
+      final retryMessage = response.statusCode == 401 ||
+              response.statusCode == 422
+          ? 'Pemeriksaan sesi, PIN, atau data belum berhasil. Kunci permintaan tetap disimpan. Periksa kembali lalu ulangi dengan nominal dan rekening yang sama. $message'
+          : 'Status penarikan belum dapat dipastikan. Coba lagi dengan nominal dan rekening yang sama. $message';
+
+      return WithdrawalRequestResult(
+        status: response.statusCode == 409
+            ? WithdrawalRequestStatus.pendingRequestMismatch
+            : WithdrawalRequestStatus.uncertain,
+        message: response.statusCode == 409 ? message : retryMessage,
+      );
+    } catch (_) {
+      // Timeout or connection loss can happen after the server committed.
+      // Keep the key so the next attempt replays instead of debiting twice.
+      return const WithdrawalRequestResult(
+        status: WithdrawalRequestStatus.uncertain,
+        message:
+            'Koneksi terputus dan status penarikan belum dapat dipastikan. Coba lagi dengan nominal serta rekening yang sama; jangan membuat pengajuan baru.',
+      );
     }
   }
 }

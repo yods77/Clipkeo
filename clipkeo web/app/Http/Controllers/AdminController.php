@@ -22,8 +22,8 @@ class AdminController extends Controller
 
         // --- 1. DATA STATISTIK UTAMA ---
         // Karena Revenue muncul, berarti kolom 'amount' aman (numeric).
-        $platformRevenue = Transaction::where('type', 'platform_fee')->sum('amount');
-        $pendingWithdrawalsCount = WithdrawalRequest::where('status', 'pending')->count();
+        $platformRevenue = Transaction::where('type', 'platform_fee')->where('status', 'success')->sum('amount');
+        $pendingWithdrawalsCount = WithdrawalRequest::whereIn('status', ['pending', 'processing'])->count();
         $pendingDepositsCount = Deposit::where('status', 'pending')->count();
         $totalUsers = User::count();
         $activeBounties = Bounty::where('status', 'active')->count();
@@ -39,21 +39,37 @@ class AdminController extends Controller
         $totalEscrowFunds = $totalUserBalances + $totalEscrowBounties;
 
         // --- 2. DATA TABEL ---
-        $latestWithdrawals = WithdrawalRequest::with('user')->where('status', 'pending')->latest()->take(5)->get();
-        $pendingWithdrawals = WithdrawalRequest::with('user')->where('status', 'pending')->latest()->get();
+        $latestWithdrawals = WithdrawalRequest::with('user')->whereIn('status', ['pending', 'processing'])->latest()->take(5)->get();
+        $pendingWithdrawals = WithdrawalRequest::with('user')->whereIn('status', ['pending', 'processing'])->latest()->get();
         $recentTransactions = Transaction::with('user')->latest()->take(10)->get();
         $pendingDeposits = Deposit::with('user')->where('status', 'pending')->latest()->get();
 
         // --- 3. DATA CHART (VERSI PHP - ANTI GAGAL) ---
         // Kita ambil data mentahnya saja, lalu hitung pakai logika PHP
-        $allTransactions = Transaction::select('type', 'amount')->get();
+        $allTransactions = Transaction::with('user')
+            ->get(['id', 'user_id', 'type', 'amount', 'status']);
 
-        // Grouping berdasarkan 'type' dan jumlahkan 'amount' (absolute)
-        $groupedData = $allTransactions->groupBy('type')->map(function ($row) {
-            return $row->sum(function ($item) {
-                return abs($item->amount); // Paksa jadi positif biar chart muncul
+        // Prize dicatat pada dua ledger: pemasukan Clipper dan pengeluaran Publisher.
+        // Pisahkan keduanya agar chart Admin tidak menyatukan makna transaksi.
+        $groupedData = $allTransactions
+            ->filter(function ($item) {
+                // Pending/failed fees are not platform revenue.
+                return $item->type !== Transaction::TYPE_PLATFORM_FEE || $item->status === 'success';
+            })
+            ->groupBy(function ($item) {
+                if ($item->type === Transaction::TYPE_BOUNTY_PRIZE) {
+                    return $item->user?->role === 'publisher'
+                        ? 'bounty_prize_publisher'
+                        : 'bounty_prize_clipper';
+                }
+
+                return $item->type;
+            })
+            ->map(function ($row) {
+                return $row->sum(function ($item) {
+                    return abs($item->amount);
+                });
             });
-        });
 
         // Konversi ke format Array untuk Chart
         $chartData = $groupedData->toArray();
@@ -64,7 +80,12 @@ class AdminController extends Controller
 
         // Rapikan tulisan Label
         $chartLabels = array_map(function ($label) {
-            return ucwords(str_replace('_', ' ', $label));
+            return match ($label) {
+                'bounty_prize_clipper' => 'Hadiah Clipper',
+                'bounty_prize_publisher' => 'Pembayaran Hadiah Publisher',
+                'withdrawal_refund' => 'Refund Withdrawal',
+                default => ucwords(str_replace('_', ' ', $label)),
+            };
         }, $rawLabels);
 
         // Ambil data pesan terbaru
